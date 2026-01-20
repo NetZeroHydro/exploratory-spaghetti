@@ -1,9 +1,14 @@
 ---
 title: "nepal_crop"
 format: html
+execute: 
+  warning: false
+  message: false
 ---
 
 ```{r}
+#| output: false
+
 library(tidyverse)
 library(janitor)
 library(dplyr)
@@ -17,6 +22,8 @@ library(terra)
 
 Load dataframes 
 ```{r}
+#| output: false
+
 # Dams
 current_dams <- read_sf(here::here('data', 'GRanD_Version_1_3')) %>% 
   clean_names()
