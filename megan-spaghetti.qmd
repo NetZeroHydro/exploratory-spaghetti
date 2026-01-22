@@ -8,7 +8,8 @@ load libraries
 library(tidyverse)
 library(janitor)
 library(dplyr)
-library(tmap)
+library(terra)
+#library(tmap)
 library(sf)
 library(here)
 library(stars)
@@ -22,10 +23,7 @@ Download data
 current_dams <- read_sf("../data/GRanD_Version_1_3") %>% 
   clean_names()
 
-future_dams <- read_excel("../data/FHReD_2015_future_dams/FHRed_2015_future_dams.xlsx") %>% 
-  clean_names()
-
-future_dams <- read_csv("../data/FHReD_2015_future_dams/FHRed_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+future_dams <- read_csv("../data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
   clean_names()
 
 # Water Basin
@@ -115,8 +113,9 @@ tm_shape(trial_future_dams) +
 # ----------------------------------------------------- 
 
 # Select 2 dams on the river 
-dam1 <- trial_future_dams[1,]
-dam2 <- trial_future_dams[2,]
+trial_future_dams_sf <- st_sf(trial_future_dams)
+dam1 <- trial_future_dams_sf[1,]
+dam2 <- trial_future_dams_sf[2,]
 
 tm_shape(trial_river) +
   tm_lines() +
