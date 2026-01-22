@@ -3,3 +3,220 @@ title: "megan-spaghetti"
 format: html
 ---
 
+load libraries
+```{r}
+library(tidyverse)
+library(janitor)
+library(dplyr)
+library(tmap)
+library(sf)
+library(here)
+library(stars)
+library(spData)
+library(terra)
+library(readxl)
+```
+
+Download data 
+```{r}
+current_dams <- read_sf("../data/GRanD_Version_1_3") %>% 
+  clean_names()
+
+future_dams <- read_excel("../data/FHReD_2015_future_dams/FHRed_2015_future_dams.xlsx") %>% 
+  clean_names()
+
+future_dams <- read_csv("../data/FHReD_2015_future_dams/FHRed_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+  clean_names()
+
+# Water Basin
+basin_level3 <- read_sf("../data/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
+  clean_names()
+
+# Rivers
+asia_rivers <- read_sf("../data/HydroRIVERS_v10_as.gdb") %>% 
+  clean_names()
+```
+# Clean data & Crop to Nepal 
+
+```{r}
+# Make future dams df spatial 
+future_dams <- st_as_sf(future_dams,
+         coords = c('lon_cleaned', 'lat_cleaned'), 
+         crs = st_crs(current_dams))
+
+# Filter water basin to Nepal Level 
+nepal_basin <- basin_level3 %>% 
+  filter(hybas_id == 4030025450)
+
+# Filter rivers to order 3 
+asia_rivers3 <- asia_rivers %>% 
+  filter(ord_clas == 3)
+
+# Make geometeries valid 
+current_dams <- st_make_valid(current_dams)
+future_dams <- st_make_valid(future_dams)
+nepal_basin <- st_make_valid(nepal_basin)
+
+# Crop dams and rivers to Nepal 
+nepal_current_dams <- st_intersection(nepal_basin, current_dams)
+nepal_future_dams <- st_intersection(nepal_basin, future_dams)
+nepal_rivers <- asia_rivers3 %>%
+  st_filter(y = nepal_basin, .predicate = st_intersects)
+
+
+rm(list = c('asia_rivers', 'asia_rivers3', 'current_dams', 'future_dams'))
+
+```
+
+# Cropping to 1 river with multiple dams on it
+
+```{r}
+# Creating bounding box of 1 river
+box_poly <- st_as_sfc(
+  st_bbox(c(xmin = 83.56, xmax = 83.6987, ymin = 28.328360, ymax = 28.704314), 
+          crs = st_crs(nepal_basin)))
+
+# Check CRS 
+st_crs(nepal_basin) == st_crs(box_poly)
+
+# Map everything 
+tm_shape(nepal_basin) + 
+  tm_polygons(fill_alpha = 0.4, lwd = 2.5) + 
+  tm_basemap('Esri.WorldTopoMap') + 
+  tm_shape(nepal_current_dams) + 
+  tm_dots(fill = "red") + 
+  tm_shape(nepal_future_dams) + 
+  tm_dots(fill = "blue") + 
+  tm_shape(nepal_rivers) + 
+  tm_lines() + 
+  tm_add_legend(type = "polygons", 
+                labels = c("Current Dams", "Future Dams"), 
+                fill = c("red", "blue"), 
+                title = "Dam Status") + 
+  tm_title(text = "Dams in Nepal") + 
+  tm_shape(box_poly) + 
+  tm_borders(lwd =2, col = "goldenrod")+ 
+  tm_compass() + 
+  tm_scalebar() 
+
+# Crop to bounding box 
+trial_current_dams <- st_intersection(box_poly, nepal_current_dams)
+trial_future_dams <- st_intersection(box_poly, nepal_future_dams)
+trial_river <- nepal_rivers %>%
+  st_filter(y = box_poly, .predicate = st_intersects)
+
+# Map new crop 
+tm_shape(trial_future_dams) + 
+  tm_dots(fill = "blue") + 
+  tm_shape(trial_river) +
+  tm_lines() +
+  tm_basemap('Esri.WorldTopoMap')
+
+# ----------------------------------------------------- 
+
+# Select 2 dams on the river 
+dam1 <- trial_future_dams[1,]
+dam2 <- trial_future_dams[2,]
+
+tm_shape(trial_river) +
+  tm_lines() +
+  tm_basemap('Esri.WorldTopoMap') + 
+  tm_shape(dam1) + 
+  tm_dots(fill = "blue") + 
+  tm_shape(dam2) + 
+  tm_dots(fill = "purple")
+
+dam_points <- rbind(dam1, dam2)
+dam_points <- data.frame(dam_points)
+dam_points <- st_as_sf(dam_points, crs = 'EPSG:4326') # make sf 
+
+```
+
+# Finding the distance between dams on this river
+
+## Clean data up
+
+```{r}
+# make sure sf 
+#trial_future_dams <- st_as_sf(trial_future_dams)
+
+# force all crs 
+dam_points <- st_transform(dam_points, crs = 3857)
+trial_future_dams <- st_transform(trial_future_dams, crs = 3857)
+trial_river <- st_transform(trial_river, crs = 3857)
+#trial_river_union <- st_transform(trial_river_union, crs = 3857)
+
+# Check them 
+st_crs(trial_river) == st_crs(trial_future_dams)
+st_crs(dam_points) == st_crs(trial_future_dams)
+
+# unionize river ? 
+trial_river_union <- st_union(trial_river)
+
+# Check classes 
+class(trial_river)
+class(trial_future_dams)
+class(trial_river_union)
+class(dam_points)
+
+# Make all valid 
+trial_future_dams <- st_make_valid(trial_future_dams)
+trial_river <- st_make_valid(trial_river)
+trial_river_union <- st_make_valid(trial_river_union)
+```
+
+
+Find total length of River 
+```{r}
+# total length of the line 
+st_length(trial_river) 
+st_length(trial_river_union) 
+```
+
+Snap Point to River
+
+```{r}
+snapped_points <- st_snap(dam_points, trial_river, tolerance = 50)
+```
+
+## Finding distance with `riverdist` 
+
+`riverdistancemat()` returns a matrix of network distances between all observations in a dataset.
+
+```{r}
+library(riverdist)
+
+# shape col => 'geometry' (need for line2networl)
+trial_river <- st_set_geometry(trial_river, "geometry") 
+# Make the river a river network 
+trial_river_network <- line2network(sf = trial_river, reproject = 'EPSG:32644')
+
+# Getting vectors of x and y 
+trial_future_dams_proj <- st_transform(trial_future_dams, 32644)
+coords_matrix <- st_coordinates(trial_future_dams_proj)
+x <- coords_matrix[ ,'X']
+y <- coords_matrix[ ,'Y']
+
+# Snap points to the river 
+xy_line <- xy2segvert(x = x, y = y, rivers = trial_river_network)
+
+# Find distance between points
+dist_mat <- riverdistancemat(vert = xy_line$vert, 
+                 seg = xy_line$seg,
+                 rivers = trial_river_network)
+dist_mat
+```
+
+**Results:**
+
+-   row and column = dam (distance from itself is 0)
+
+    -   row 1 and column 1 = dam 1
+
+    -   row 2 and column 2 = dam 2
+
+-   off-diagonal entries = river HYDROLOGICAL /NETWORK distance
+
+    -   Distance from dam 1 to dam 2 = 110315 m
+
+
