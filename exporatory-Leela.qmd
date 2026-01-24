@@ -3,11 +3,6 @@ title: "exporatory-Leela"
 format: html
 ---
 
-  ---
-title: "nepal_crop"
-format: html
----
-
 ```{r}
 library(tidyverse)
 library(janitor)
@@ -19,30 +14,32 @@ library(stars)
 library(spData)
 library(terra)
 library(riverconn)
+library(igraph)
+library(tidygraph)
 ```
 
 Load dataframes 
 ```{r}
 # Dams
-current_dams <- read_sf(here::here('data', 'GRanD_Version_1_3')) %>% 
+current_dams <- read_sf("../data/GRanD_Version_1_3") %>% 
   clean_names()
 
-future_dams <- read_csv(here::here('data', 'FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv')) %>% 
+future_dams <- read_csv('../data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv') %>% 
   clean_names()
 
 # Population
-global_pop_sf <- read_stars(here::here('data', 'global_pop_2020_CN_1km_R2025A_UA_v1.tif')) %>% 
+global_pop_sf <- read_stars('../data/global_pop_2020_CN_1km_R2025A_UA_v1.tif') %>% 
   clean_names()
 
-global_pop_rast <- rast(here::here('data', 'global_pop_2020_CN_1km_R2025A_UA_v1.tif')) %>% 
+global_pop_rast <- rast('../data/global_pop_2020_CN_1km_R2025A_UA_v1.tif') %>% 
   clean_names()
 
 # Water Basin
-basin_level3 <- read_sf(here::here('data', 'hybas_as_lev03_v1c.shp')) %>% 
+basin_level3 <- read_sf('../data/hybas_as_lev03_v1c/hybas_as_lev03_v1c.shp') %>% 
   clean_names()
 
 # Rivers
-asia_rivers <- read_sf(here::here('data', 'HydroRIVERS_v10_as.gdb')) %>% 
+asia_rivers <- read_sf('../data/HydroRIVERS_v10_as.gdb') %>% 
   clean_names()
 
 ```
@@ -62,15 +59,15 @@ nepal_basin <- basin_level3 %>%
 
 Filtering Rivers to order 2 or 3 
 ```{r}
-asia_rivers2 <- asia_rivers %>% 
-  filter(ord_clas == 2)
+# asia_rivers2 <- asia_rivers %>% 
+#   filter(ord_clas == 2)
 
 asia_rivers3 <- asia_rivers %>% 
   filter(ord_clas == 3)
 
 # Look at difference between river order 2 vs 3 
-tm_shape(asia_rivers2) + 
-  tm_lines()
+# tm_shape(asia_rivers2) + 
+#   tm_lines()
 
 tm_shape(asia_rivers3) + 
   tm_lines()
@@ -82,7 +79,7 @@ Making geometeries valid
 current_dams <- st_make_valid(current_dams)
 future_dams <- st_make_valid(future_dams)
 nepal_basin <- st_make_valid(nepal_basin)
-asia_rivers2 <- st_make_valid(asia_rivers2)
+#asia_rivers2 <- st_make_valid(asia_rivers2)
 asia_rivers3 <- st_make_valid(asia_rivers3)
 ```
 
@@ -90,8 +87,11 @@ Crop dams and rivers to Nepal basin
 ```{r}
 nepal_current_dams <- st_intersection(nepal_basin, current_dams)
 nepal_future_dams <- st_intersection(nepal_basin, future_dams)
-#nepal_rivers3 <- st_intersection(nepal_basin, asia_rivers3)
-#nepal_rivers2 <- st_intersection(nepal_basin, asia_rivers2)
+# nepal_rivers3 <- st_intersects(nepal_basin, asia_rivers3)
+# nepal_rivers2 <- st_intersects(nepal_basin, asia_rivers2)
+
+nepal_rivers <- asia_rivers3 %>% 
+  st_filter(y = nepal_basin, .predicate = st_intersects)
 ```
 
 Map! 
@@ -114,3 +114,64 @@ tm_shape(nepal_basin) +
   tm_scalebar()
 
 ```
+
+Plot rivers for crop of Nepal
+```{r}
+tm_shape(nepal_rivers) +
+  tm_lines() +
+tm_shape(current_dams) +
+  tm_dots() +
+  tm_graticules() 
+
+# Dams are not on the river networks, so we can snap them together?
+crs(nepal_rivers)
+crs(current_dams)
+```
+
+Problem: Tried to make rivers into points, but too much overlap to identify confluences I think. don't know how to define points on the rivers, then don't know how to map a line along the river between 2 points.
+
+trying with tidygraph
+```{r}
+nepal_edges <- nepal_rivers %>%
+  mutate(edgeID = c(1:n()))
+
+
+nepal_nodes <- nepal_edges %>%
+  st_coordinates() %>%
+  as_tibble() %>%
+  rename(edgeID = L1) %>%
+  group_by(edgeID) %>%
+  slice(c(1, n())) %>%
+  ungroup() %>%
+  mutate(start_end = rep(c('start', 'end'), times = n()/2))
+
+nepal_nodes <- st_as_sf(nepal_nodes, coords = c("Y", "X"), crs = 4326)
+
+nepal_nodes <- nepal_nodes %>%
+  mutate(xy = paste(.$X, .$Y)) %>%
+  mutate(nodeID = group_indices(., factor(xy, levels = unique(xy)))) %>%
+  select(-xy)
+
+source_nodes <- nepal_nodes %>%
+  filter(start_end == 'start') %>%
+  pull(nodeID)
+target_nodes <- nepal_nodes %>%
+  filter(start_end == 'end') %>%
+  pull(nodeID)
+nepal_edges = nepal_edges %>%
+  mutate(from = source_nodes, to = target_nodes)
+
+nepal_nodes1 <- nepal_nodes %>%
+  distinct(nodeID, .keep_all = TRUE) %>%
+  select(-c(edgeID, start_end)) %>%
+  st_as_sf(coords = c('X', 'Y')) %>%
+  st_set_crs(st_crs(nepal_edges))
+
+nepal_graph = igraph::tbl_graph(nepal_nodes = nepal_nodes, nepal_edges = as_tibble(nepal_edges), directed = FALSE)
+```
+
+```{r}
+tm_shape(nepal_nodes1) +
+  tm_dots()
+```
+
