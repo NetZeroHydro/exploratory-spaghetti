@@ -16,30 +16,31 @@ library(terra)
 library(riverconn)
 library(igraph)
 library(tidygraph)
+library(sfnetworks)
 ```
 
 Load dataframes 
 ```{r}
 # Dams
-current_dams <- read_sf("../data/GRanD_Version_1_3") %>% 
+current_dams <- read_sf("../../../../capstone/netzerohydro/data/GRanD_Version_1_3") %>% 
   clean_names()
 
-future_dams <- read_csv('../data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv') %>% 
+future_dams <- read_csv('../../../../capstone/netzerohydro/data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv') %>% 
   clean_names()
 
 # Population
-global_pop_sf <- read_stars('../data/global_pop_2020_CN_1km_R2025A_UA_v1.tif') %>% 
+global_pop_sf <- read_stars('../../../../capstone/netzerohydro/data/global_pop_2020_CN_1km_R2025A_UA_v1.tif') %>% 
   clean_names()
 
-global_pop_rast <- rast('../data/global_pop_2020_CN_1km_R2025A_UA_v1.tif') %>% 
+global_pop_rast <- rast('../../../../capstone/netzerohydro/data/global_pop_2020_CN_1km_R2025A_UA_v1.tif') %>% 
   clean_names()
 
 # Water Basin
-basin_level3 <- read_sf('../data/hybas_as_lev03_v1c/hybas_as_lev03_v1c.shp') %>% 
+basin_level3 <- read_sf('../../../../capstone/netzerohydro/data/hybas_as_lev03_v1c/hybas_as_lev03_v1c.shp') %>% 
   clean_names()
 
 # Rivers
-asia_rivers <- read_sf('../data/HydroRIVERS_v10_as.gdb') %>% 
+asia_rivers <- read_sf('../../../../capstone/netzerohydro/data/HydroRIVERS_v10_as.gdb') %>% 
   clean_names()
 
 ```
@@ -59,15 +60,15 @@ nepal_basin <- basin_level3 %>%
 
 Filtering Rivers to order 2 or 3 
 ```{r}
-# asia_rivers2 <- asia_rivers %>% 
-#   filter(ord_clas == 2)
+asia_rivers2 <- asia_rivers %>%
+  filter(ord_clas == 2)
 
 asia_rivers3 <- asia_rivers %>% 
   filter(ord_clas == 3)
 
 # Look at difference between river order 2 vs 3 
-# tm_shape(asia_rivers2) + 
-#   tm_lines()
+tm_shape(asia_rivers2) +
+  tm_lines()
 
 tm_shape(asia_rivers3) + 
   tm_lines()
@@ -79,7 +80,7 @@ Making geometeries valid
 current_dams <- st_make_valid(current_dams)
 future_dams <- st_make_valid(future_dams)
 nepal_basin <- st_make_valid(nepal_basin)
-#asia_rivers2 <- st_make_valid(asia_rivers2)
+asia_rivers2 <- st_make_valid(asia_rivers2)
 asia_rivers3 <- st_make_valid(asia_rivers3)
 ```
 
@@ -173,5 +174,88 @@ nepal_graph = igraph::tbl_graph(nepal_nodes = nepal_nodes, nepal_edges = as_tibb
 ```{r}
 tm_shape(nepal_nodes1) +
   tm_dots()
+```
+
+bbox for one river
+```{r}
+box_poly <- st_as_sfc(
+  st_bbox(c(xmin = 83.56, xmax = 83.6987, ymin = 28.328360, ymax = 28.704314), 
+          crs = st_crs(nepal_basin)))
+
+trial_current_dams <- st_intersection(box_poly, nepal_current_dams)
+trial_future_dams <- st_intersection(box_poly, nepal_future_dams)
+trial_river <- nepal_rivers %>%
+  st_filter(y = box_poly, .predicate = st_intersects)
+
+trial_future_dams_sf <- st_sf(trial_future_dams)
+dam1 <- trial_future_dams_sf[1,]
+dam2 <- trial_future_dams_sf[2,]
+```
+
+
+Trying sf network 
+```{r}
+nepal_river_net <- as_sfnetwork(trial_river)
+```
+
+```{r}
+# quick plot only nodes
+plot(nepal_river_net, draw_lines = FALSE) # sooo many nodes in full nepal
+# quick plot notes and connecting lines
+plot(nepal_river_net)
+```
+
+```{r}
+# transform data to sfnetwork type and 
+net <- as_sfnetwork(trial_river) %>% 
+  activate("edges") %>%
+  mutate(weight = edge_length())
+
+net_df <- as_tibble(net)
+
+# define path
+paths = st_network_paths(net, from = 3, to = 15, weight = "weight")
+
+# lists nodes
+paths %>%
+  slice(1) %>%
+  pull(node_paths) %>%
+  unlist()
+# lists edges
+paths %>%
+  slice(1) %>%
+  pull(edge_paths) %>%
+  unlist()
+
+plot_path = function(node_path) {
+  net %>%
+    activate("nodes") %>%
+    slice(node_path) %>%
+    plot(cex = 1.5, lwd = 1.5, add = TRUE)
+}
+
+colors = sf.colors(3, categorical = TRUE)
+
+plot(net, col = "grey")
+paths %>%
+  pull(node_paths) %>%
+  walk(plot_path)
+net %>%
+  activate("nodes") %>%
+  st_as_sf() %>%
+  slice(c(3, 15)) %>%
+  plot(col = colors, pch = 8, cex = 2, lwd = 2, add = TRUE)
+
+```
+
+```{r}
+net_sf <- st_as_sf(net)
+
+tm_shape(net_df) +
+  tm_dots()
+
+paths %>%
+  map(plot_path)
+
 ```
 
