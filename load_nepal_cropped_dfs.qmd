@@ -1,0 +1,103 @@
+---
+title: "load_nepal_cropped_.dfs"
+format: html
+---
+
+load libraries
+```{r}
+library(tidyverse)
+library(janitor)
+library(dplyr)
+library(terra)
+#library(tmap)
+library(sf)
+library(here)
+library(stars)
+library(spData)
+library(terra)
+library(readxl)
+```
+
+Download data 
+```{r}
+# Dams
+current_dams <- read_sf("../../../../../capstone/netzerohydro/data/GRanD_Version_1_3") %>% 
+  clean_names()
+
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+  clean_names()
+
+# Water Basin
+basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
+  clean_names()
+
+# Rivers
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/HydroRIVERS_v10_as.gdb") %>% 
+  clean_names()
+```
+
+# Clean data & Crop to Nepal 
+```{r}
+# Make future dams df spatial 
+future_dams <- st_as_sf(future_dams,
+         coords = c('lon_cleaned', 'lat_cleaned'), 
+         crs = st_crs(current_dams))
+
+# Filter water basin to Nepal Level 
+nepal_basin <- basin_level3 %>% 
+  filter(hybas_id == 4030025450)
+
+# Filter rivers to order 3 
+asia_rivers3 <- asia_rivers %>% 
+  filter(ord_stra >= 3)
+
+# Make geometeries valid 
+current_dams <- st_make_valid(current_dams)
+future_dams <- st_make_valid(future_dams)
+nepal_basin <- st_make_valid(nepal_basin)
+
+# Crop dams and rivers to Nepal 
+nepal_current_dams <- st_intersection(nepal_basin, current_dams)
+nepal_future_dams <- st_intersection(nepal_basin, future_dams)
+nepal_rivers_3up <- asia_rivers3 %>%
+  st_filter(y = nepal_basin, .predicate = st_intersects)
+
+
+```
+
+Trial River Cropping 
+```{r}
+# Creating bounding box of 1 river
+box_poly <- st_as_sfc(
+  st_bbox(c(xmin = 83.56, xmax = 83.6987, ymin = 28.328360, ymax = 28.704314), 
+          crs = st_crs(nepal_basin)))
+
+# Check CRS 
+st_crs(nepal_basin) == st_crs(box_poly)
+
+# Crop to bounding box 
+trial_current_dams <- st_intersection(box_poly, nepal_current_dams)
+trial_future_dams <- st_intersection(box_poly, nepal_future_dams)
+trial_river <- nepal_rivers_3up %>%
+  st_filter(y = box_poly, .predicate = st_intersects)
+
+```
+
+
+```{r}
+# Save trial river 
+saveRDS(trial_river, "../../../../../capstone/netzerohydro/data/cleaned_v1/trial_river.rds")
+
+# Save current and future dams cleaned
+saveRDS(current_dams, "../../../../../capstone/netzerohydro/data/cleaned_v1/current_dams.rds")
+saveRDS(future_dams, "../../../../../capstone/netzerohydro/data/cleaned_v1/future_dams.rds")
+
+
+# Save Nepal masked 
+saveRDS(nepal_basin, "../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_basin.rds")
+saveRDS(nepal_current_dams, "../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_current_dams.rds")
+saveRDS(nepal_future_dams, "../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_future_dams.rds")
+saveRDS(nepal_rivers_3up, "../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_rivers_3up.rds")
+
+```
+
