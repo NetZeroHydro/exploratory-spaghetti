@@ -17,6 +17,7 @@ library(riverconn)
 library(igraph)
 library(tidygraph)
 library(sfnetworks)
+library(lwgeom)
 ```
 
 Load dataframes 
@@ -43,6 +44,9 @@ basin_level3 <- read_sf('../../../../capstone/netzerohydro/data/hybas_as_lev03_v
 asia_rivers <- read_sf('../../../../capstone/netzerohydro/data/HydroRIVERS_v10_as.gdb') %>% 
   clean_names()
 
+# nepal rivers order 3up
+nepal_rivers_3up <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_rivers_3up.rds")
+
 ```
 
 Making `future_dams` spatial  
@@ -64,7 +68,7 @@ asia_rivers2 <- asia_rivers %>%
   filter(ord_clas == 2)
 
 asia_rivers3 <- asia_rivers %>% 
-  filter(ord_clas == 3)
+  filter(ord_clas >= 3)
 
 # Look at difference between river order 2 vs 3 
 tm_shape(asia_rivers2) +
@@ -257,5 +261,44 @@ tm_shape(net_df) +
 paths %>%
   map(plot_path)
 
+```
+
+Snap dams to trial rivers
+```{r}
+nepal_rivers_3up <- st_set_geometry(nepal_rivers, "geometry")
+nepal_rivers_3up <- st_transform(nepal_rivers_3up, crs = 3857)
+nepal_current_dams <- st_transform(nepal_current_dams, crs = 3857)
+currentdams_nodes <- st_snap(nepal_current_dams, nepal_rivers_3up, tolerance = 10000)
+
+dim(nepal_current_dams)
+dim(currentdams_nodes)
+
+tm_shape(nepal_rivers) +
+  tm_lines() +
+tm_shape(nepal_current_dams) +
+  tm_dots(fill = "red") +
+tm_shape(currentdams_nodes) +
+  tm_dots(fill = "blue", alpha = 0.5)
+  
+
+```
+
+```{r}
+nepal_rivers_net <- as_sfnetwork(nepal_rivers_3up)
+plot(nepal_rivers_net)
+currentdams_nodes <- st_snap(nepal_current_dams, nepal_rivers_net, tolerance = 10000)
+
+colnames(nepal_rivers_net)
+
+nepal_dam_string <- st_split(nepal_rivers_net$geometry, currentdams_nodes$geometry) %>% 
+  st_collection_extract("LINESTRING")
+```
+
+```{r}
+currentdams_nodes <- as_sfnetwork(nepal_current_dams, directed = FALSE)
+
+nepal_river_dams <- st_network_join(nepal_rivers_net, currentdams_nodes)
+
+plot(nepal_river_dams)
 ```
 
