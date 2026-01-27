@@ -3,6 +3,8 @@ title: "Combined Exploratory Code"
 format: html
 ---
 
+**Note:** Update file paths in the "Load Raw Data" section to match your data directory structure. The code uses `here::here()` for relative paths - adjust as needed for your setup.
+
 # Load Libraries
 
 Load all required packages for data manipulation, spatial analysis, and network analysis.
@@ -32,25 +34,25 @@ Load all spatial and tabular datasets from their original sources.
 
 ```{r}
 # Dams - Current and Future
-current_dams <- read_sf("../data/GRanD_Version_1_3") %>% 
+current_dams <- read_sf("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
   clean_names()
 
-future_dams <- read_csv("../data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
   clean_names()
 
 # Population data (optional - used in some analyses)
-global_pop_sf <- read_stars("../../../../capstone/netzerohydro/data/global_pop_2020_CN_1km_R2025A_UA_v1.tif") %>% 
+global_pop_sf <- read_stars("../../../../../capstone/netzerohydro/data/raw/global_pop_2020_CN_1km_R2025A_UA_v1.tif") %>% 
   clean_names()
 
-global_pop_rast <- rast("../../../../capstone/netzerohydro/data/global_pop_2020_CN_1km_R2025A_UA_v1.tif") %>% 
+global_pop_rast <- rast("../../../../../capstone/netzerohydro/data/raw/global_pop_2020_CN_1km_R2025A_UA_v1.tif") %>% 
   clean_names()
 
 # Water Basin - Level 3
-basin_level3 <- read_sf("../data/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
+basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/raw/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
   clean_names()
 
 # Rivers - Asia
-asia_rivers <- read_sf("../data/HydroRIVERS_v10_as.gdb") %>% 
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/raw/HydroRIVERS_v10_as.gdb") %>% 
   clean_names()
 ```
 
@@ -94,26 +96,50 @@ tm_shape(asia_rivers3) +
   tm_lines()
 ```
 
-# Clean Geometries
+# Clean Geometries and Match CRS
 
-Make all geometries valid to ensure spatial operations work correctly.
+Make all geometries valid and ensure all spatial objects have matching CRS before performing spatial operations.
 
 ```{r}
+# Make geometries valid
 current_dams <- st_make_valid(current_dams)
 future_dams <- st_make_valid(future_dams)
 nepal_basin <- st_make_valid(nepal_basin)
 asia_rivers2 <- st_make_valid(asia_rivers2)
 asia_rivers3 <- st_make_valid(asia_rivers3)
+
+# Ensure all objects have the same CRS (use nepal_basin CRS as reference)
+target_crs <- st_crs(nepal_basin)
+
+# Transform all to match nepal_basin CRS
+current_dams <- st_transform(current_dams, crs = target_crs)
+future_dams <- st_transform(future_dams, crs = target_crs)
+asia_rivers <- st_transform(asia_rivers, crs = target_crs)
+asia_rivers2 <- st_transform(asia_rivers2, crs = target_crs)
+asia_rivers3 <- st_transform(asia_rivers3, crs = target_crs)
 ```
 
 # Crop Dams and Rivers to Nepal Basin
 
-Clip all spatial data to the Nepal basin boundary using spatial intersection.
+Clip all spatial data to the Nepal basin boundary using spatial intersection. Ensure CRS match before cropping.
 
 ```{r}
+# Ensure CRS match before cropping
+current_dams <- st_transform(current_dams, crs = st_crs(nepal_basin))
+future_dams <- st_transform(future_dams, crs = st_crs(nepal_basin))
+asia_rivers3 <- st_transform(asia_rivers3, crs = st_crs(nepal_basin))
+
 # Crop dams to Nepal basin
 nepal_current_dams <- st_intersection(nepal_basin, current_dams)
 nepal_future_dams <- st_intersection(nepal_basin, future_dams)
+
+# Ensure CRS is preserved after intersection
+if (is.na(st_crs(nepal_current_dams))) {
+  nepal_current_dams <- st_set_crs(nepal_current_dams, st_crs(nepal_basin))
+}
+if (is.na(st_crs(nepal_future_dams))) {
+  nepal_future_dams <- st_set_crs(nepal_future_dams, st_crs(nepal_basin))
+}
 
 # Crop rivers to Nepal basin - using st_filter to keep all river segments that intersect
 nepal_rivers <- asia_rivers3 %>%
@@ -125,7 +151,8 @@ nepal_rivers <- asia_rivers3 %>%
 Combine river orders 3-9 to create a comprehensive river network dataset for Nepal.
 
 ```{r}
-# First, get all rivers in Nepal basin
+# First, get all rivers in Nepal basin - ensure CRS match
+asia_rivers <- st_transform(asia_rivers, crs = st_crs(nepal_basin))
 nepal_rivers_all <- asia_rivers %>%
   st_filter(y = nepal_basin, .predicate = st_intersects)
 
@@ -164,6 +191,11 @@ nepal_rivers_3up <- rbind(
 
 # Make geometries valid
 nepal_rivers_3up <- st_make_valid(nepal_rivers_3up)
+
+# Ensure CRS is preserved after rbind and st_make_valid
+if (is.na(st_crs(nepal_rivers_3up))) {
+  nepal_rivers_3up <- st_set_crs(nepal_rivers_3up, st_crs(nepal_basin))
+}
 ```
 
 # Map Dams and Rivers in Nepal
@@ -252,10 +284,21 @@ crs(current_dams)
 Focus analysis on a single river segment with multiple dams using a bounding box for detailed analysis.
 
 ```{r}
+# Ensure nepal_rivers_3up has CRS set
+if (is.na(st_crs(nepal_rivers_3up))) {
+  nepal_rivers_3up <- st_set_crs(nepal_rivers_3up, st_crs(nepal_basin))
+}
+
 # Creating bounding box of 1 river
 box_poly <- st_as_sfc(
   st_bbox(c(xmin = 83.56, xmax = 83.6987, ymin = 28.328360, ymax = 28.704314), 
           crs = st_crs(nepal_basin)))
+
+# Ensure CRS match
+box_poly <- st_transform(box_poly, crs = st_crs(nepal_basin))
+nepal_rivers_3up <- st_transform(nepal_rivers_3up, crs = st_crs(nepal_basin))
+nepal_current_dams <- st_transform(nepal_current_dams, crs = st_crs(nepal_basin))
+nepal_future_dams <- st_transform(nepal_future_dams, crs = st_crs(nepal_basin))
 
 # Check CRS 
 st_crs(nepal_basin) == st_crs(box_poly)
@@ -321,6 +364,14 @@ Calculate the hydrological distance between dams along the river network.
 Ensure all geometries are valid and transform to a common CRS (Web Mercator) for accurate distance calculations.
 
 ```{r}
+# Ensure CRS is set before transforming
+if (is.na(st_crs(dam_points))) {
+  dam_points <- st_set_crs(dam_points, st_crs(nepal_basin))
+}
+if (is.na(st_crs(trial_river))) {
+  trial_river <- st_set_crs(trial_river, st_crs(nepal_basin))
+}
+
 # Transform all to Web Mercator (3857) for distance calculations
 dam_points <- st_transform(dam_points, crs = 3857)
 trial_future_dams <- st_transform(trial_future_dams, crs = 3857)
@@ -372,6 +423,11 @@ Use the `riverdist` package to calculate network distances between dams along th
 `riverdistancemat()` returns a matrix of network distances between all observations in a dataset.
 
 ```{r}
+# Ensure CRS is set
+if (is.na(st_crs(trial_river))) {
+  trial_river <- st_set_crs(trial_river, 3857)
+}
+
 # Set geometry column (required for line2network)
 trial_river <- st_set_geometry(trial_river, "geometry") 
 
@@ -427,13 +483,17 @@ nepal_nodes <- nepal_edges %>%
   ungroup() %>%
   mutate(start_end = rep(c('start', 'end'), times = n()/2))
 
-# Convert to spatial points
-nepal_nodes <- st_as_sf(nepal_nodes, coords = c("Y", "X"), crs = 4326)
+# Convert to spatial points - note: coordinates are in X, Y order from st_coordinates
+nepal_nodes <- st_as_sf(nepal_nodes, coords = c("X", "Y"), crs = st_crs(nepal_rivers_3up))
 
-# Create unique node IDs
+# Create unique node IDs using coordinates
 nepal_nodes <- nepal_nodes %>%
-  mutate(xy = paste(.$X, .$Y)) %>%
-  mutate(nodeID = group_indices(., factor(xy, levels = unique(xy)))) %>%
+  mutate(
+    X = st_coordinates(.)[, "X"],
+    Y = st_coordinates(.)[, "Y"],
+    xy = paste(X, Y, sep = "_")
+  ) %>%
+  mutate(nodeID = as.numeric(factor(xy, levels = unique(xy)))) %>%
   select(-xy)
 
 # Get source and target nodes for edges
@@ -448,15 +508,13 @@ target_nodes <- nepal_nodes %>%
 nepal_edges = nepal_edges %>%
   mutate(from = source_nodes, to = target_nodes)
 
-# Create distinct nodes
+# Create distinct nodes for visualization
 nepal_nodes1 <- nepal_nodes %>%
   distinct(nodeID, .keep_all = TRUE) %>%
-  select(-c(edgeID, start_end)) %>%
-  st_as_sf(coords = c('X', 'Y')) %>%
-  st_set_crs(st_crs(nepal_edges))
+  select(-c(edgeID, start_end, X, Y))
 
-# Create graph object
-nepal_graph = igraph::tbl_graph(nodes = nepal_nodes, edges = as_tibble(nepal_edges), directed = FALSE)
+# Create graph object using tidygraph (not igraph)
+nepal_graph = tidygraph::tbl_graph(nodes = nepal_nodes, edges = as_tibble(nepal_edges), directed = FALSE)
 ```
 
 ```{r}
@@ -533,8 +591,10 @@ net_sf <- st_as_sf(net)
 tm_shape(net_df) +
   tm_dots()
 
+# Plot paths - need to extract node_paths first
 paths %>%
-  map(plot_path)
+  pull(node_paths) %>%
+  walk(plot_path)
 ```
 
 # Snap Dams to Rivers
@@ -542,10 +602,48 @@ paths %>%
 Snap dam locations to the nearest point on the river network for accurate distance calculations and network analysis.
 
 ```{r}
+# Ensure CRS is set before transforming - use more robust check
+# Check if CRS exists by trying to get the input value
+check_crs <- function(x) {
+  crs_val <- tryCatch(st_crs(x)$input, error = function(e) NA)
+  return(is.na(crs_val) || is.null(crs_val) || crs_val == "")
+}
+
+# Get reference CRS
+ref_crs <- st_crs(nepal_basin)
+if (check_crs(nepal_basin)) {
+  ref_crs <- st_crs(4326)  # Default to WGS84
+}
+
+# Explicitly set CRS if missing (use direct assignment which is more reliable)
+if (check_crs(nepal_rivers_3up)) {
+  st_crs(nepal_rivers_3up) <- ref_crs
+}
+if (check_crs(nepal_current_dams)) {
+  st_crs(nepal_current_dams) <- ref_crs
+}
+
+# Verify CRS is set before transforming
+cat("nepal_rivers_3up CRS:", tryCatch(st_crs(nepal_rivers_3up)$input, error = function(e) "MISSING"), "\n")
+cat("nepal_current_dams CRS:", tryCatch(st_crs(nepal_current_dams)$input, error = function(e) "MISSING"), "\n")
+
 # Transform to common CRS for snapping (Web Mercator)
-nepal_rivers_3up_snap <- st_set_geometry(nepal_rivers_3up, "geometry")
-nepal_rivers_3up_snap <- st_transform(nepal_rivers_3up_snap, crs = 3857)
-nepal_current_dams_snap <- st_transform(nepal_current_dams, crs = 3857)
+# Use tryCatch with fallback if CRS is still missing
+nepal_rivers_3up_snap <- tryCatch({
+  st_transform(nepal_rivers_3up, crs = 3857)
+}, error = function(e) {
+  # If transform fails, set CRS to 4326 first, then transform
+  st_crs(nepal_rivers_3up) <- 4326
+  st_transform(nepal_rivers_3up, crs = 3857)
+})
+
+nepal_current_dams_snap <- tryCatch({
+  st_transform(nepal_current_dams, crs = 3857)
+}, error = function(e) {
+  # If transform fails, set CRS to 4326 first, then transform
+  st_crs(nepal_current_dams) <- 4326
+  st_transform(nepal_current_dams, crs = 3857)
+})
 
 # Snap dams to rivers with tolerance
 currentdams_nodes <- st_snap(nepal_current_dams_snap, nepal_rivers_3up_snap, tolerance = 10000)
