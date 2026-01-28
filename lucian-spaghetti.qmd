@@ -1,0 +1,890 @@
+---
+title: "Combined Exploratory Code"
+format: html
+---
+
+**Note:** Update file paths in the "Load Raw Data" section to match your data directory structure. The code uses `here::here()` for relative paths - adjust as needed for your setup.
+
+# Load Libraries
+
+Load all required packages for data manipulation, spatial analysis, and network analysis.
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(dplyr)
+library(terra)
+library(tmap)
+library(sf)
+library(here)
+library(stars)
+library(spData)
+library(readxl)
+library(riverconn)
+library(igraph)
+library(tidygraph)
+library(sfnetworks)
+library(lwgeom)
+library(riverdist)
+```
+
+# Load Raw Data
+
+Load all spatial and tabular datasets from their original sources.
+
+```{r}
+# Dams - Current and Future
+current_dams <- read_sf("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
+  clean_names()
+
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+  clean_names()
+
+# Population data (optional - used in some analyses)
+global_pop_sf <- read_stars("../../../../../capstone/netzerohydro/data/raw/global_pop_2020_CN_1km_R2025A_UA_v1.tif") %>% 
+  clean_names()
+
+global_pop_rast <- rast("../../../../../capstone/netzerohydro/data/raw/global_pop_2020_CN_1km_R2025A_UA_v1.tif") %>% 
+  clean_names()
+
+# Water Basin - Level 3
+basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/raw/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
+  clean_names()
+
+# Rivers - Asia
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/raw/HydroRIVERS_v10_as.gdb") %>% 
+  clean_names()
+```
+
+# Make Future Dams Spatial
+
+Convert the future dams CSV to a spatial object using longitude and latitude coordinates.
+
+```{r}
+future_dams <- st_as_sf(future_dams,
+         coords = c('lon_cleaned', 'lat_cleaned'), 
+         crs = st_crs(current_dams))
+```
+
+# Filter to Nepal Basin
+
+Extract the Nepal basin polygon from the level 3 basin data using the specific basin ID.
+
+```{r}
+nepal_basin <- basin_level3 %>% 
+  filter(hybas_id == 4030025450)
+```
+
+# Filter Rivers by Order
+
+Filter rivers to different Strahler orders to examine network complexity. We'll create separate datasets for orders 2 and 3+ for comparison.
+
+```{r}
+# Filter to order 2
+asia_rivers2 <- asia_rivers %>% 
+  filter(ord_clas == 2)
+
+# Filter to order 3
+asia_rivers3 <- asia_rivers %>% 
+  filter(ord_clas == 3)
+
+# Look at difference between river order 2 vs 3 
+tm_shape(asia_rivers2) + 
+  tm_lines()
+
+tm_shape(asia_rivers3) + 
+  tm_lines()
+```
+
+# Clean Geometries and Match CRS
+
+Make all geometries valid and ensure all spatial objects have matching CRS before performing spatial operations.
+
+```{r}
+# Make geometries valid
+current_dams <- st_make_valid(current_dams)
+future_dams <- st_make_valid(future_dams)
+nepal_basin <- st_make_valid(nepal_basin)
+asia_rivers2 <- st_make_valid(asia_rivers2)
+asia_rivers3 <- st_make_valid(asia_rivers3)
+
+# Ensure all objects have the same CRS (use nepal_basin CRS as reference)
+target_crs <- st_crs(nepal_basin)
+
+# Transform all to match nepal_basin CRS
+current_dams <- st_transform(current_dams, crs = target_crs)
+future_dams <- st_transform(future_dams, crs = target_crs)
+asia_rivers <- st_transform(asia_rivers, crs = target_crs)
+asia_rivers2 <- st_transform(asia_rivers2, crs = target_crs)
+asia_rivers3 <- st_transform(asia_rivers3, crs = target_crs)
+```
+
+# Crop Dams and Rivers to Nepal Basin
+
+Clip all spatial data to the Nepal basin boundary using spatial intersection. Ensure CRS match before cropping.
+
+```{r}
+# Ensure CRS match before cropping
+current_dams <- st_transform(current_dams, crs = st_crs(nepal_basin))
+future_dams <- st_transform(future_dams, crs = st_crs(nepal_basin))
+asia_rivers3 <- st_transform(asia_rivers3, crs = st_crs(nepal_basin))
+
+# Crop dams to Nepal basin
+nepal_current_dams <- st_intersection(nepal_basin, current_dams)
+nepal_future_dams <- st_intersection(nepal_basin, future_dams)
+
+# Ensure CRS is preserved after intersection
+if (is.na(st_crs(nepal_current_dams))) {
+  nepal_current_dams <- st_set_crs(nepal_current_dams, st_crs(nepal_basin))
+}
+if (is.na(st_crs(nepal_future_dams))) {
+  nepal_future_dams <- st_set_crs(nepal_future_dams, st_crs(nepal_basin))
+}
+
+# Crop rivers to Nepal basin - using st_filter to keep all river segments that intersect
+nepal_rivers <- asia_rivers3 %>%
+  st_filter(y = nepal_basin, .predicate = st_intersects)
+```
+
+# Create Nepal Rivers Order 3 and Up
+
+Combine river orders 3-9 to create a comprehensive river network dataset for Nepal.
+
+```{r}
+# First, get all rivers in Nepal basin - ensure CRS match
+asia_rivers <- st_transform(asia_rivers, crs = st_crs(nepal_basin))
+nepal_rivers_all <- asia_rivers %>%
+  st_filter(y = nepal_basin, .predicate = st_intersects)
+
+# Filter rivers to individual orders
+nepal_rivers3 <- nepal_rivers_all %>% 
+  filter(ord_stra == 3)
+
+nepal_rivers4 <- nepal_rivers_all %>% 
+  filter(ord_stra == 4)
+
+nepal_rivers5 <- nepal_rivers_all %>% 
+  filter(ord_stra == 5)
+
+nepal_rivers6 <- nepal_rivers_all %>% 
+  filter(ord_stra == 6)
+
+nepal_rivers7 <- nepal_rivers_all %>% 
+  filter(ord_stra == 7)
+
+nepal_rivers8 <- nepal_rivers_all %>% 
+  filter(ord_stra == 8)
+
+nepal_rivers9 <- nepal_rivers_all %>% 
+  filter(ord_stra == 9)
+
+# Combine all orders 3-9 into single dataset
+nepal_rivers_3up <- rbind(
+  nepal_rivers3,
+  nepal_rivers4,
+  nepal_rivers5,
+  nepal_rivers6,
+  nepal_rivers7,
+  nepal_rivers8,
+  nepal_rivers9
+)
+
+# Make geometries valid
+nepal_rivers_3up <- st_make_valid(nepal_rivers_3up)
+
+# Ensure CRS is preserved after rbind and st_make_valid
+if (is.na(st_crs(nepal_rivers_3up))) {
+  nepal_rivers_3up <- st_set_crs(nepal_rivers_3up, st_crs(nepal_basin))
+}
+```
+
+# Map Dams and Rivers in Nepal
+
+Create a comprehensive map showing current dams, future dams, and rivers within the Nepal basin.
+
+```{r}
+# Clean attribute data to remove invalid UTF-8 characters before mapping
+# This function removes invalid UTF-8 from character columns
+clean_utf8 <- function(x) {
+  if (inherits(x, "sf")) {
+    # Clean all character columns
+    char_cols <- sapply(x, is.character)
+    for (col in names(x)[char_cols]) {
+      if (col != attr(x, "sf_column")) {  # Skip geometry column
+        x[[col]] <- iconv(x[[col]], from = "UTF-8", to = "UTF-8", sub = "")
+      }
+    }
+  }
+  return(x)
+}
+
+# Clean the data before mapping
+nepal_basin <- clean_utf8(nepal_basin)
+nepal_current_dams <- clean_utf8(nepal_current_dams)
+nepal_future_dams <- clean_utf8(nepal_future_dams)
+nepal_rivers_3up <- clean_utf8(nepal_rivers_3up)
+
+tm_shape(nepal_basin) + 
+  tm_polygons(fill_alpha = 0.4, lwd = 2.5) + 
+  tm_basemap('Esri.WorldTopoMap') + 
+  tm_shape(nepal_current_dams) + 
+  tm_dots(fill = "red") + 
+  tm_shape(nepal_future_dams) + 
+  tm_dots(fill = "blue") + 
+  tm_shape(nepal_rivers_3up) + 
+  tm_lines() + 
+  tm_add_legend(type = "polygons", 
+                labels = c("Current Dams", "Future Dams"), 
+                fill = c("red", "blue"), 
+                title = "Dam Status") + 
+  tm_title(text = "Dams in Nepal") + 
+  tm_compass() + 
+  tm_scalebar()
+```
+
+
+# Plot Rivers and Check CRS
+
+Examine river network and dam locations to check if dams align with rivers (may need snapping).
+
+```{r}
+tm_shape(nepal_rivers_3up) +
+  tm_lines() +
+tm_shape(current_dams) +
+  tm_dots() +
+  tm_graticules() 
+
+# Dams are not on the river networks, so we can snap them together?
+crs(nepal_rivers_3up)
+crs(current_dams)
+```
+
+# Cropping to Single River with Multiple Dams
+
+Focus analysis on a single river segment with multiple dams using a bounding box for detailed analysis.
+
+```{r}
+# Get reference CRS
+ref_crs <- st_crs(nepal_basin)
+if (is.na(ref_crs)) {
+  ref_crs <- st_crs(4326)  # Default to WGS84
+}
+
+# Ensure nepal_rivers_3up has CRS set
+if (is.na(st_crs(nepal_rivers_3up))) {
+  nepal_rivers_3up <- st_set_crs(nepal_rivers_3up, ref_crs)
+}
+
+# Creating bounding box of 1 river - create polygon directly with CRS
+box_coords <- matrix(c(
+  83.56, 28.328360,      # bottom-left
+  83.6987, 28.328360,   # bottom-right
+  83.6987, 28.704314,   # top-right
+  83.56, 28.704314,     # top-left
+  83.56, 28.328360      # close polygon
+), ncol = 2, byrow = TRUE)
+
+box_poly <- st_polygon(list(box_coords)) %>%
+  st_sfc(crs = ref_crs)
+
+# Ensure CRS match for all objects (only transform if CRS differs)
+# Check CRS by comparing EPSG codes - only works on sf/sfc objects, not bbox
+check_and_transform <- function(x, target_crs) {
+  # Skip if x is not an sf/sfc object
+  if (!inherits(x, c("sf", "sfc", "sfg"))) {
+    return(x)
+  }
+  x_crs <- tryCatch(st_crs(x)$epsg, error = function(e) NA)
+  target_epsg <- tryCatch(st_crs(target_crs)$epsg, error = function(e) NA)
+  if (is.na(x_crs) || is.na(target_epsg) || x_crs != target_epsg) {
+    return(st_transform(x, crs = target_crs))
+  }
+  return(x)
+}
+
+nepal_rivers_3up <- check_and_transform(nepal_rivers_3up, ref_crs)
+nepal_current_dams <- check_and_transform(nepal_current_dams, ref_crs)
+nepal_future_dams <- check_and_transform(nepal_future_dams, ref_crs)
+
+# Check CRS 
+st_crs(nepal_basin) == st_crs(box_poly)
+
+# Union all rivers into one object (much faster)
+nepal_rivers_3up_union <- st_union(nepal_rivers_3up)
+
+# Map everything with bounding box highlighted
+tm_shape(nepal_basin) +
+  tm_polygons(fill_alpha = 0.4, lwd = 2.5) +
+  #tm_basemap('Esri.WorldTopoMap') +
+  tm_shape(nepal_current_dams) +
+  tm_dots(fill = "red") +
+  tm_shape(nepal_future_dams) +
+  tm_dots(fill = "blue") +
+  tm_shape(nepal_rivers_3up_union) +
+  tm_lines(col = "black", lwd = 2) +
+  tm_add_legend(type = "polygons",
+                labels = c("Current Dams", "Future Dams"),
+                fill = c("red", "blue"),
+                title = "Dam Status") +
+  tm_title(text = "Dams in Nepal") +
+  tm_shape(box_poly) +
+  tm_borders(lwd =2, col = "goldenrod")+
+  tm_compass() +
+  tm_scalebar()
+```
+
+
+```{r}
+# Crop to bounding box 
+trial_current_dams <- st_intersection(box_poly, nepal_current_dams)
+trial_future_dams <- st_intersection(box_poly, nepal_future_dams)
+trial_river <- nepal_rivers_3up %>%
+  st_filter(y = box_poly, .predicate = st_intersects)
+
+# Map new crop 
+tm_shape(trial_future_dams) + 
+  tm_dots(fill = "blue") + 
+  tm_shape(trial_river) +
+  tm_lines()
+  #tm_basemap('Esri.WorldTopoMap')
+
+# Select 2 dams on the river for distance analysis
+trial_future_dams_sf <- st_sf(trial_future_dams)
+dam1 <- trial_future_dams_sf[1,]
+dam2 <- trial_future_dams_sf[2,]
+
+tm_shape(trial_river) +
+  tm_lines() +
+  #tm_basemap('Esri.WorldTopoMap') + 
+  tm_shape(dam1) + 
+  tm_dots(fill = "blue") + 
+  tm_shape(dam2) + 
+  tm_dots(fill = "purple")
+
+# Create dam points dataset
+dam_points <- rbind(dam1, dam2)
+dam_points <- data.frame(dam_points)
+dam_points <- st_as_sf(dam_points, crs = 'EPSG:4326') # make sf 
+```
+
+# Finding Distance Between Dams on River
+
+Calculate the hydrological distance between dams along the river network.
+
+## Prepare Data for Distance Calculations
+
+Ensure all geometries are valid and transform to a common CRS (Web Mercator) for accurate distance calculations.
+
+```{r}
+# Ensure CRS is set before transforming
+if (is.na(st_crs(dam_points))) {
+  dam_points <- st_set_crs(dam_points, st_crs(nepal_basin))
+}
+if (is.na(st_crs(trial_river))) {
+  trial_river <- st_set_crs(trial_river, st_crs(nepal_basin))
+}
+
+
+# Transform all to Web Mercator (3857) for distance calculations
+dam_points <- st_transform(dam_points, crs = 3857)
+trial_future_dams <- st_transform(trial_future_dams, crs = 3857)
+trial_river <- st_transform(trial_river, crs = 3857)
+
+# Check CRS match
+st_crs(trial_river) == st_crs(trial_future_dams)
+st_crs(dam_points) == st_crs(trial_future_dams)
+
+# Unionize river segments into single line
+trial_river_union <- st_union(trial_river)
+
+# Check classes 
+class(trial_river)
+class(trial_future_dams)
+class(trial_river_union)
+class(dam_points)
+
+# Make all geometries valid
+trial_future_dams <- st_make_valid(trial_future_dams)
+trial_river <- st_make_valid(trial_river)
+trial_river_union <- st_make_valid(trial_river_union)
+```
+
+## Find Total Length of River
+
+Calculate the total length of the river segment.
+
+```{r}
+# Total length of the line segments
+st_length(trial_river) 
+
+# Total length of the unionized river
+st_length(trial_river_union) 
+```
+
+## Snap Points to River
+
+Snap dam points to the nearest point on the river line within tolerance.
+
+```{r}
+snapped_points <- st_snap(dam_points, trial_river, tolerance = 50)
+```
+
+## Finding Distance with `riverdist`
+
+Use the `riverdist` package to calculate network distances between dams along the river. This package calculates hydrological distances following the river network, not straight-line distances.
+
+`riverdistancemat()` returns a matrix of network distances between all observations in a dataset.
+
+```{r}
+# Ensure CRS is set
+if (is.na(st_crs(trial_river))) {
+  trial_river <- st_set_crs(trial_river, 3857)
+}
+
+# Set geometry column (required for line2network)
+trial_river <- st_set_geometry(trial_river, "geometry") 
+
+# Make the river a river network object
+trial_river_network <- line2network(sf = trial_river, reproject = 'EPSG:32644')
+
+# Get coordinates of dams in projected CRS
+trial_future_dams_proj <- st_transform(trial_future_dams, 32644)
+coords_matrix <- st_coordinates(trial_future_dams_proj)
+x <- coords_matrix[ ,'X']
+y <- coords_matrix[ ,'Y']
+
+# Snap points to the river network
+xy_line <- xy2segvert(x = x, y = y, rivers = trial_river_network)
+
+# Find distance between points along the river network
+dist_mat <- riverdistancemat(vert = xy_line$vert, 
+                 seg = xy_line$seg,
+                 rivers = trial_river_network)
+dist_mat
+```
+
+**Results:**
+
+-   Row and column = dam (distance from itself is 0)
+    -   Row 1 and column 1 = dam 1
+    -   Row 2 and column 2 = dam 2
+-   Off-diagonal entries = river HYDROLOGICAL /NETWORK distance
+    -   Distance from dam 1 to dam 2 = 110315 m
+
+# Network Analysis Approaches
+
+Alternative methods for analyzing river networks and dam connectivity using graph theory.
+
+## Tidygraph Approach
+
+Convert river network to a graph structure using tidygraph to identify nodes and edges. This approach attempts to create a network graph from the river lines.
+
+**Problem:** Tried to make rivers into points, but too much overlap to identify confluences I think. don't know how to define points on the rivers, then don't know how to map a line along the river between 2 points.
+
+```{r}
+# Create edges from river segments
+nepal_edges <- nepal_rivers_3up %>%
+  mutate(edgeID = c(1:n()))
+
+# Extract nodes from edges (start and end points of each segment)
+nepal_nodes <- nepal_edges %>%
+  st_coordinates() %>%
+  as_tibble() %>%
+  rename(edgeID = L1) %>%
+  group_by(edgeID) %>%
+  slice(c(1, n())) %>%  # Get first and last point of each segment
+  ungroup() %>%
+  mutate(start_end = rep(c('start', 'end'), times = n()/2))
+
+# Convert to spatial points - note: coordinates are in X, Y order from st_coordinates
+nepal_nodes <- st_as_sf(nepal_nodes, coords = c("X", "Y"), crs = st_crs(nepal_rivers_3up))
+
+# Create unique node IDs using coordinates
+nepal_nodes <- nepal_nodes %>%
+  mutate(
+    X = st_coordinates(.)[, "X"],
+    Y = st_coordinates(.)[, "Y"],
+    xy = paste(X, Y, sep = "_")
+  ) %>%
+  mutate(nodeID = as.numeric(factor(xy, levels = unique(xy)))) %>%
+  select(-xy)
+
+# Get source and target nodes for edges
+source_nodes <- nepal_nodes %>%
+  filter(start_end == 'start') %>%
+  pull(nodeID)
+target_nodes <- nepal_nodes %>%
+  filter(start_end == 'end') %>%
+  pull(nodeID)
+
+# Add from/to to edges
+nepal_edges = nepal_edges %>%
+  mutate(from = source_nodes, to = target_nodes)
+
+# Create distinct nodes for visualization
+nepal_nodes1 <- nepal_nodes %>%
+  distinct(nodeID, .keep_all = TRUE) %>%
+  select(-c(edgeID, start_end, X, Y))
+
+# Create graph object using tidygraph (not igraph)
+nepal_graph = tidygraph::tbl_graph(nodes = nepal_nodes, edges = as_tibble(nepal_edges), directed = FALSE)
+```
+
+```{r}
+# Visualize nodes
+tm_shape(nepal_nodes1) +
+  tm_dots()
+```
+
+## SFNetwork Approach
+
+Use `sfnetworks` package to create a network from the river lines and find paths between points. This is a more direct approach than tidygraph.
+
+```{r}
+# Convert trial river to sfnetwork
+nepal_river_net <- as_sfnetwork(trial_river)
+```
+
+```{r}
+# Quick plot only nodes
+plot(nepal_river_net, draw_lines = FALSE) # sooo many nodes in full nepal
+# Quick plot nodes and connecting lines
+plot(nepal_river_net)
+```
+
+```{r}
+# Transform data to sfnetwork type and add edge weights
+net <- as_sfnetwork(trial_river) %>% 
+  activate("edges") %>%
+  mutate(weight = edge_length())
+
+net_df <- as_tibble(net)
+
+# Define path between nodes
+paths = st_network_paths(net, from = 3, to = 15, weight = "weight")
+
+# Lists nodes in path
+paths %>%
+  slice(1) %>%
+  pull(node_paths) %>%
+  unlist()
+
+# Lists edges in path
+paths %>%
+  slice(1) %>%
+  pull(edge_paths) %>%
+  unlist()
+
+# Function to plot path
+plot_path = function(node_path) {
+  net %>%
+    activate("nodes") %>%
+    slice(node_path) %>%
+    plot(cex = 1.5, lwd = 1.5, add = TRUE)
+}
+
+colors = sf.colors(3, categorical = TRUE)
+
+# Plot network and paths
+plot(net, col = "grey")
+paths %>%
+  pull(node_paths) %>%
+  walk(plot_path)
+net %>%
+  activate("nodes") %>%
+  st_as_sf() %>%
+  slice(c(3, 15)) %>%
+  plot(col = colors, pch = 8, cex = 2, lwd = 2, add = TRUE)
+```
+
+```{r}
+
+# Set explicitly
+st_crs(net_sf) <- crs(trial_river)
+
+# Convert network to sf for mapping
+net_sf <- st_as_sf(net)
+
+tm_shape(net_sf) +
+  tm_dots(col = "red", size = 0.1)
+
+# Plot paths - need to extract node_paths first
+paths %>%
+  pull(node_paths) %>%
+  walk(plot_path)
+```
+
+# Snap Dams to Rivers
+
+Snap dam locations to the nearest point on the river network for accurate distance calculations and network analysis.
+
+```{r}
+# Ensure CRS is set before transforming - use more robust check
+# Check if CRS exists by trying to get the input value
+check_crs <- function(x) {
+  crs_val <- tryCatch(st_crs(x)$input, error = function(e) NA)
+  return(is.na(crs_val) || is.null(crs_val) || crs_val == "")
+}
+
+# Get reference CRS
+ref_crs <- st_crs(nepal_basin)
+if (check_crs(nepal_basin)) {
+  ref_crs <- st_crs(4326)  # Default to WGS84
+}
+
+# Explicitly set CRS if missing (use direct assignment which is more reliable)
+if (check_crs(nepal_rivers_3up)) {
+  st_crs(nepal_rivers_3up) <- ref_crs
+}
+if (check_crs(nepal_current_dams)) {
+  st_crs(nepal_current_dams) <- ref_crs
+}
+
+# Verify CRS is set before transforming
+cat("nepal_rivers_3up CRS:", tryCatch(st_crs(nepal_rivers_3up)$input, error = function(e) "MISSING"), "\n")
+cat("nepal_current_dams CRS:", tryCatch(st_crs(nepal_current_dams)$input, error = function(e) "MISSING"), "\n")
+
+# Transform to common CRS for snapping (Web Mercator)
+# Use tryCatch with fallback if CRS is still missing
+nepal_rivers_3up_snap <- tryCatch({
+  st_transform(nepal_rivers_3up, crs = 3857)
+}, error = function(e) {
+  # If transform fails, set CRS to 4326 first, then transform
+  st_crs(nepal_rivers_3up) <- 4326
+  st_transform(nepal_rivers_3up, crs = 3857)
+})
+
+nepal_current_dams_snap <- tryCatch({
+  st_transform(nepal_current_dams, crs = 3857)
+}, error = function(e) {
+  # If transform fails, set CRS to 4326 first, then transform
+  st_crs(nepal_current_dams) <- 4326
+  st_transform(nepal_current_dams, crs = 3857)
+})
+```
+
+
+```{r}
+# Snap dams to rivers with tolerance
+currentdams_nodes <- st_snap(nepal_current_dams_snap, nepal_rivers_3up_snap, tolerance = 10000)
+
+# Check dimensions
+dim(nepal_current_dams_snap)
+dim(currentdams_nodes)
+
+# Visualize original and snapped dams
+tm_shape(nepal_rivers_3up) +
+  tm_lines() +
+tm_shape(nepal_current_dams) +
+  tm_dots(fill = "red") +
+tm_shape(currentdams_nodes) +
+  tm_dots(fill = "blue", fill_alpha = 0.5)
+```
+
+```{r}
+# Create network from rivers
+nepal_rivers_net <- as_sfnetwork(nepal_rivers_3up_snap)
+plot(nepal_rivers_net)
+
+# Try snapping to network object
+currentdams_nodes2 <- st_snap(nepal_current_dams_snap, nepal_rivers_net, tolerance = 10000)
+
+colnames(nepal_rivers_net)
+
+# Split river network at dam locations
+nepal_dam_string <- st_split(nepal_rivers_net$geometry, currentdams_nodes2$geometry) %>% 
+  st_collection_extract("LINESTRING")
+```
+
+```{r}
+# Create network from dams
+currentdams_nodes_net <- as_sfnetwork(nepal_current_dams_snap, directed = FALSE)
+
+# Join dam network with river network
+nepal_river_dams <- st_network_join(nepal_rivers_net, currentdams_nodes_net)
+
+plot(nepal_river_dams)
+```
+
+```{r}
+# Clean Up and Expand Connectivity Matrix
+
+This section builds on the existing distance matrix (`dist_mat`) from the riverdist analysis and the snapped dams (`currentdams_nodes`) to create a comprehensive connectivity matrix that includes both current and future dams.
+
+## Add Current Dams to Existing Distance Matrix
+
+We already have a distance matrix for future dams (`dist_mat`). Now we'll add current dams to create a complete connectivity matrix.
+```
+
+
+```{r}
+# We already have:
+# - dist_mat: distance matrix for future dams (from riverdist section)
+# - xy_line: future dams network positions (from riverdist section)  
+# - currentdams_nodes: snapped current dams (from Snap Dams to Rivers section)
+# - trial_river_network: river network object (from riverdist section)
+
+# Transform current dams to UTM Zone 44N (same CRS as network)
+trial_current_dams_proj <- st_transform(trial_current_dams, crs = 32644)
+
+# Get coordinates of current dams
+coords_current <- st_coordinates(trial_current_dams_proj)
+x_current <- coords_current[, 'X']
+y_current <- coords_current[, 'Y']
+
+# Snap current dams to river network (reuse existing approach)
+current_dams_network <- xy2segvert(x = x_current, 
+                                    y = y_current, 
+                                    rivers = trial_river_network)
+
+# Check how many dams we have
+n_future <- length(xy_line$vert)  # Future dams from existing matrix
+n_current <- length(current_dams_network$vert)  # Current dams
+
+cat("Future dams:", n_future, "\n")
+cat("Current dams:", n_current, "\n")
+```
+
+## Create Combined Distance Matrix
+
+Combine current and future dams into a single distance matrix.
+
+```{r}
+# Combine all dam network positions
+all_dams_vert <- c(current_dams_network$vert, xy_line$vert)
+all_dams_seg <- c(current_dams_network$seg, xy_line$seg)
+
+# Calculate complete distance matrix for all dams
+all_dams_dist_matrix <- riverdistancemat(vert = all_dams_vert,
+                                         seg = all_dams_seg,
+                                         rivers = trial_river_network)
+
+# Display the matrix
+cat("Complete distance matrix (meters):\n")
+print(all_dams_dist_matrix)
+```
+
+## Clean Up and Simplify Distance Matrix
+
+Convert the matrix to a clean, easy-to-use format for analysis and plotting.
+
+```{r}
+# Create meaningful labels
+dam_labels <- c(paste0("Current_", 1:n_current), 
+                paste0("Future_", 1:n_future))
+
+# Convert to data frame with clear names
+connectivity_matrix <- as.data.frame(all_dams_dist_matrix)
+rownames(connectivity_matrix) <- dam_labels
+colnames(connectivity_matrix) <- dam_labels
+
+# Display cleaned matrix
+cat("\nCleaned connectivity matrix:\n")
+print(connectivity_matrix)
+```
+
+## Extract Distances for Analysis
+
+Extract pairwise distances into a simple data frame for easy analysis and plotting.
+
+```{r}
+# Create a tidy data frame of all dam pairs and distances
+# Only get upper triangle to avoid duplicates (matrix is symmetric)
+distances_df <- data.frame()
+
+# Extract all unique pairs (upper triangle only)
+for (i in 1:(n_current + n_future - 1)) {
+  for (j in (i + 1):(n_current + n_future)) {
+    distances_df <- rbind(distances_df,
+      data.frame(
+        Dam1 = dam_labels[i],
+        Dam2 = dam_labels[j],
+        Distance_m = all_dams_dist_matrix[i, j],
+        Type = ifelse(i <= n_current & j <= n_current, "Current-Current",
+               ifelse(i > n_current & j > n_current, "Future-Future",
+                      "Current-Future"))
+      )
+    )
+  }
+}
+
+# Display summary
+cat("\n=== Distance Summary ===\n")
+cat("Total dam pairs:", nrow(distances_df), "\n")
+cat("\nFirst 10 pairs:\n")
+print(head(distances_df, 10))
+
+cat("\nDistance statistics by type:\n")
+print(aggregate(Distance_m ~ Type, distances_df, 
+                FUN = function(x) c(
+                  mean = round(mean(x), 2),
+                  min = round(min(x), 2),
+                  max = round(max(x), 2),
+                  median = round(median(x), 2)
+                )))
+```
+
+## Extract Reach Distances for Plotting
+
+Extract specific distances between consecutive dams (reaches) for visualization.
+
+```{r}
+# Sort dams by their position along the river (using segment and vertex)
+dam_positions <- data.frame(
+  Dam = dam_labels,
+  Segment = all_dams_seg,
+  Vertex = all_dams_vert,
+  Type = c(rep("Current", n_current), rep("Future", n_future))
+)
+
+# Sort by segment, then by vertex to get upstream to downstream order
+dam_positions <- dam_positions %>%
+  arrange(Segment, Vertex)
+
+# Calculate distances between consecutive dams (reaches)
+reach_distances <- data.frame()
+
+for (i in 1:(nrow(dam_positions) - 1)) {
+  dam1_idx <- which(dam_labels == dam_positions$Dam[i])
+  dam2_idx <- which(dam_labels == dam_positions$Dam[i + 1])
+  
+  reach_distances <- rbind(reach_distances,
+    data.frame(
+      From_Dam = dam_positions$Dam[i],
+      To_Dam = dam_positions$Dam[i + 1],
+      Reach_Distance_m = all_dams_dist_matrix[dam1_idx, dam2_idx],
+      From_Type = dam_positions$Type[i],
+      To_Type = dam_positions$Type[i + 1]
+    )
+  )
+}
+
+cat("\n=== Reach Distances (Consecutive Dams) ===\n")
+print(reach_distances)
+```
+
+## Visualize Connectivity
+
+Create a simple visualization showing all dams with their connectivity.
+
+```{r}
+# Map showing all dams on the river
+tm_shape(trial_river) +
+  tm_lines(col = "blue", lwd = 2) +
+  tm_shape(trial_current_dams) +
+  tm_dots(fill = "red", size = 0.3) +
+  tm_shape(trial_future_dams) +
+  tm_dots(fill = "purple", size = 0.3) +
+  tm_add_legend(type = "symbol",
+                labels = c("Current Dams", "Future Dams", "River"),
+                col = c("red", "purple", "blue"),
+                title = "Dam Connectivity")
+```
+
+**Summary:** 
+- `connectivity_matrix`: Full distance matrix (data frame format)
+- `distances_df`: All pairwise distances in tidy format
+- `reach_distances`: Distances between consecutive dams along the river
+- All distances are in meters along the river network (hydrological distance, not straight-line)
+```
+
