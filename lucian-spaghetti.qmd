@@ -528,6 +528,7 @@ nepal_nodes1 <- nepal_nodes %>%
 
 # Create graph object using tidygraph (not igraph)
 nepal_graph = tidygraph::tbl_graph(nodes = nepal_nodes, edges = as_tibble(nepal_edges), directed = FALSE)
+nepal_graph
 ```
 
 ```{r}
@@ -645,7 +646,6 @@ cat("nepal_rivers_3up CRS:", tryCatch(st_crs(nepal_rivers_3up)$input, error = fu
 cat("nepal_current_dams CRS:", tryCatch(st_crs(nepal_current_dams)$input, error = function(e) "MISSING"), "\n")
 
 # Transform to common CRS for snapping (Web Mercator)
-# Use tryCatch with fallback if CRS is still missing
 nepal_rivers_3up_snap <- tryCatch({
   st_transform(nepal_rivers_3up, crs = 3857)
 }, error = function(e) {
@@ -706,7 +706,8 @@ nepal_river_dams <- st_network_join(nepal_rivers_net, currentdams_nodes_net)
 plot(nepal_river_dams)
 ```
 
-```{r}
+
+
 # Clean Up and Expand Connectivity Matrix
 
 This section builds on the existing distance matrix (`dist_mat`) from the riverdist analysis and the snapped dams (`currentdams_nodes`) to create a comprehensive connectivity matrix that includes both current and future dams.
@@ -714,8 +715,6 @@ This section builds on the existing distance matrix (`dist_mat`) from the riverd
 ## Add Current Dams to Existing Distance Matrix
 
 We already have a distance matrix for future dams (`dist_mat`). Now we'll add current dams to create a complete connectivity matrix.
-```
-
 
 ```{r}
 # We already have:
@@ -724,23 +723,48 @@ We already have a distance matrix for future dams (`dist_mat`). Now we'll add cu
 # - currentdams_nodes: snapped current dams (from Snap Dams to Rivers section)
 # - trial_river_network: river network object (from riverdist section)
 
-# Transform current dams to UTM Zone 44N (same CRS as network)
-trial_current_dams_proj <- st_transform(trial_current_dams, crs = 32644)
+box_poly <- st_geometry(nepal_basin)
 
-# Get coordinates of current dams
-coords_current <- st_coordinates(trial_current_dams_proj)
-x_current <- coords_current[, 'X']
-y_current <- coords_current[, 'Y']
+box_poly <- st_transform(box_poly, st_crs(nepal_current_dams))
 
-# Snap current dams to river network (reuse existing approach)
-current_dams_network <- xy2segvert(x = x_current, 
-                                    y = y_current, 
-                                    rivers = trial_river_network)
+# Now filter (returns sf)
+trial_current_dams <- nepal_current_dams %>%
+  st_filter(y = box_poly, .predicate = st_intersects)
+
+class(trial_current_dams)
+nrow(trial_current_dams)
+  
+  
+  
+  # Transform current dams to UTM Zone 44N (same CRS as network)
+  trial_current_dams_proj <- st_transform(trial_current_dams, crs = 32644)
+
+  # Get coordinates of current dams (use same approach as future dams)
+  coords_current <- st_coordinates(trial_current_dams_proj)
+  
+  # Extract X and Y - try column names first (like future dams), then fall back to position
+  if ("X" %in% colnames(coords_current)) {
+    x_current <- as.numeric(coords_current[, 'X'])
+    y_current <- as.numeric(coords_current[, 'Y'])
+  } else {
+    # Fall back to column position
+    x_current <- as.numeric(coords_current[, 1])
+    y_current <- as.numeric(coords_current[, 2])
+  }
+
+  # Ensure we have valid coordinates
+  cat("Current dams coordinates - X:", length(x_current), "Y:", length(y_current), "\n")
+  cat("X range:", range(x_current), "Y range:", range(y_current), "\n")
+
+  # Snap current dams to river network (use exact same approach as future dams)
+  current_dams_network <- xy2segvert(x = x_current, 
+                                      y = y_current, 
+                                      rivers = trial_river_network)
+  n_current <- length(current_dams_network$vert)
+}
 
 # Check how many dams we have
 n_future <- length(xy_line$vert)  # Future dams from existing matrix
-n_current <- length(current_dams_network$vert)  # Current dams
-
 cat("Future dams:", n_future, "\n")
 cat("Current dams:", n_current, "\n")
 ```
@@ -751,8 +775,16 @@ Combine current and future dams into a single distance matrix.
 
 ```{r}
 # Combine all dam network positions
-all_dams_vert <- c(current_dams_network$vert, xy_line$vert)
-all_dams_seg <- c(current_dams_network$seg, xy_line$seg)
+# Handle case where there are no current dams
+if (n_current > 0 && !is.null(current_dams_network)) {
+  all_dams_vert <- c(current_dams_network$vert, xy_line$vert)
+  all_dams_seg <- c(current_dams_network$seg, xy_line$seg)
+} else {
+  # Only future dams
+  all_dams_vert <- xy_line$vert
+  all_dams_seg <- xy_line$seg
+  cat("Note: Using only future dams (no current dams in trial area)\n")
+}
 
 # Calculate complete distance matrix for all dams
 all_dams_dist_matrix <- riverdistancemat(vert = all_dams_vert,
@@ -770,8 +802,12 @@ Convert the matrix to a clean, easy-to-use format for analysis and plotting.
 
 ```{r}
 # Create meaningful labels
-dam_labels <- c(paste0("Current_", 1:n_current), 
-                paste0("Future_", 1:n_future))
+if (n_current > 0) {
+  dam_labels <- c(paste0("Current_", 1:n_current), 
+                  paste0("Future_", 1:n_future))
+} else {
+  dam_labels <- paste0("Future_", 1:n_future)
+}
 
 # Convert to data frame with clear names
 connectivity_matrix <- as.data.frame(all_dams_dist_matrix)
@@ -886,5 +922,3 @@ tm_shape(trial_river) +
 - `distances_df`: All pairwise distances in tidy format
 - `reach_distances`: Distances between consecutive dams along the river
 - All distances are in meters along the river network (hydrological distance, not straight-line)
-```
-
