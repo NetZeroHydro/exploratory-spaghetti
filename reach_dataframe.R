@@ -1,6 +1,7 @@
-# Extract all pairwise distances from connectivity matrix
+# Extract all distances (reach) from connectivity matrix
 # NOTE: This uses ONLY CURRENT DAMS (future dams not included in connectivity_matrix)
-# Requires: connectivity_matrix, dam_nodes, net_with_dams
+# NOTE: Not yet directional
+# Requires running connectivity_matrix.qmd --- Environemnt should have: connectivity_matrix, dam_nodes, net_with_dams 
 
 # Get hybas_id for each dam node directly from network
 dam_hybas_ids <- net_with_dams %>%
@@ -31,12 +32,6 @@ reach_df <- data.frame(
   distance_m = distances,                   # Distance value in meters
   stringsAsFactors = FALSE                  # Keep character columns as character
 )
-
-# EXPLANATION OF ZEROS AND DUPLICATE DISTANCES:
-# - Zeros (distance = 0): Multiple dams snapped to the SAME node in the network
-#   (happens when dams are very close together, within snapping tolerance)
-# - Duplicate distances: Dams on the same river segment or equidistant from common points
-#   (common in river networks where many dams share the same path segments)
 
 # Count pairs with zero distance (dams at same network node)
 zero_pairs <- sum(reach_df$distance_m == 0, na.rm = TRUE)
