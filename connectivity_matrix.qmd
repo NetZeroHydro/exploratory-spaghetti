@@ -1,0 +1,152 @@
+---
+title: "connectivity_matrix"
+format: html
+---
+
+```{r}
+#| output: false 
+library(sfnetworks)
+library(sf)
+library(tidygraph)
+library(dplyr)
+library(purrr)
+library(TSP)
+library(tmap)
+library(igraph)
+```
+
+```{r}
+nepal_rivers <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_rivers_3up.rds") 
+nepal_current_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_current_dams.rds") 
+
+```
+
+Change `nepal_rivers` to 'LINESTRING'
+```{r}
+# Change MULTISTRINGS TO LINESTRING (for sfnetwork)
+nepal_rivers <- st_cast(nepal_rivers , "LINESTRING")
+
+```
+
+## Convert Nepal River network to sfnetwork
+
+```{r}
+net <- as_sfnetwork(nepal_rivers, direction = TRUE) %>% # convert river geom into spatial network 
+  activate("edges") %>%  # "Next operation applied to edges table (not node table)"
+  mutate(weight = edge_length()) # calculate spatial length of each edge (river segment)
+         
+
+net_df <- as_tibble(net) # makes sfnetwork a df 
+
+```
+
+Checking direction
+
+```{r}
+# Checking if directional
+st_network_paths(net, from = 3, to = 15, weight = "weight") 
+st_network_paths(net, from = 15, to = 3, weight = "weight") # warned! 
+
+```
+
+Checking CRS and geometry names
+
+```{r}
+# Check CRS 
+#st_crs(nepal_current_dams) # EPSG",4326
+#st_crs(nepal_rivers) # "EPSG",4326 
+#st_crs(net) # WGS 84 / EPSG",4326
+
+st_crs(nepal_current_dams) == st_crs(nepal_rivers) # TRUE 
+st_crs(nepal_current_dams) == st_crs(net) # TRUE 
+
+# Change shape geometry to `geometry` 
+nepal_rivers <- st_set_geometry(nepal_rivers, "geometry") 
+
+```
+
+```{r}
+# `nepal_current_dams` is polygons. Need to be points 
+nepal_current_dams <- st_point_on_surface(nepal_current_dams)
+
+# before blending, mark which nodes are dams 
+nepal_current_dams <- nepal_current_dams %>% 
+  mutate(is_dam = TRUE)
+
+```
+
+# Snapping dams and creating nodes
+
+`st_network_blend()` does the heavy lifting: it finds the nearest edge for each dam point, snaps the point to it, and splits that edge into two new edges with a new node at the dam location.
+
+-   Blends a point into a network: process of (1) snapping given point in nearest edge in network (2) splitting edge at location (3) adding snapped point as node to network
+
+-   If location of snapped point is alreadt a node, the attributes of point will be joined to the pre-existing node
+
+```{r}
+# snapping and creating nodes of dams 
+net_with_dams <- net %>% 
+  st_network_blend(nepal_current_dams, tolerance = 1000)
+
+net_with_dams_df <- as_tibble(net_with_dams) # makes sfnetwork a df 
+
+```
+
+### Look at snapped dams that are now nodes
+
+```{r}
+
+# See which nodes are dams 
+net_with_dams %>% 
+  activate("nodes") %>% 
+  as_tibble() %>% 
+  filter(is_dam == TRUE)
+
+# Snapped 74 dam nodes (of the 80 `nepal_current_dams` obs) - thats good! 
+
+
+# Pulling `hybas_id` dams that snapped to the river network 
+hybas_id_snapped_dams <- net_with_dams %>% 
+  activate("nodes") %>% 
+  as_tibble() %>% 
+  filter(is_dam == TRUE) %>% 
+  pull(hybas_id)
+
+```
+
+### Look at total dams numbers vs snapped dams numbers
+
+```{r}
+# all dams 
+length(nepal_current_dams$hybas_id)
+
+# Dams that were snapped 
+length(hybas_id_snapped_dams)
+
+```
+
+## Creating a **directional** connectivity matrix
+
+```{r}
+
+# Getting the dam node ID 
+dam_nodes <- net_with_dams %>% 
+  activate("nodes") %>% 
+  mutate(node_id = row_number()) %>% # create new column with node ID
+  as_tibble() %>% 
+  filter(is_dam == TRUE) %>% 
+  pull(node_id) # list of all dam nodes 
+
+# Create connective matrix 
+connectivity_matrix  <- distances(  # library(igraph) - calculates shortest path 
+  net_with_dams, 
+  v = dam_nodes, # starting nodes 
+  to = dam_nodes, # ending nodes - creats all pairwise combinations 
+  weights = activate(net_with_dams, "edges") %>% # use river segment lengths to calculate shortest path 
+  pull(weight), # extract the `weight` column
+  #mode = "out"
+  )
+
+connectivity_matrix
+
+```
