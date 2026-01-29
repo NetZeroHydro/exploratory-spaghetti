@@ -31,7 +31,7 @@ nepal_rivers <- st_cast(nepal_rivers , "LINESTRING")
 ## Convert Nepal River network to sfnetwork
 
 ```{r}
-net <- as_sfnetwork(nepal_rivers, direction = TRUE) %>% # convert river geom into spatial network 
+net <- as_sfnetwork(nepal_rivers, directed = TRUE) %>% # convert river geom into spatial network
   activate("edges") %>%  # "Next operation applied to edges table (not node table)"
   mutate(weight = edge_length()) # calculate spatial length of each edge (river segment)
          
@@ -81,7 +81,7 @@ nepal_current_dams <- nepal_current_dams %>%
 
 -   Blends a point into a network: process of (1) snapping given point in nearest edge in network (2) splitting edge at location (3) adding snapped point as node to network
 
--   If location of snapped point is alreadt a node, the attributes of point will be joined to the pre-existing node
+-   If location of snapped point is already a node, the attributes of point will be joined to the pre-existing node
 
 ```{r}
 # snapping and creating nodes of dams 
