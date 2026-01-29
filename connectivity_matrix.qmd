@@ -31,7 +31,7 @@ nepal_rivers <- st_cast(nepal_rivers , "LINESTRING")
 ## Convert Nepal River network to sfnetwork
 
 ```{r}
-net <- as_sfnetwork(nepal_rivers, directed = TRUE) %>% # convert river geom into spatial network
+net <- as_sfnetwork(nepal_rivers, direction = TRUE) %>% # convert river geom into spatial network
   activate("edges") %>%  # "Next operation applied to edges table (not node table)"
   mutate(weight = edge_length()) # calculate spatial length of each edge (river segment)
          
