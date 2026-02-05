@@ -1,0 +1,92 @@
+---
+title: "river_orders"
+format: html
+---
+
+```{r}
+library(tmap)
+```
+
+
+```{r}
+# Save Nepal masked 
+nepal_basin <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_basin.rds")
+nepal_future_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_current_dams.rds")
+nepal_current_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_future_dams.rds")
+
+# All asia Rivers
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/HydroRIVERS_v10_as.gdb") %>% 
+  clean_names()
+
+```
+
+Crop for Nepal 
+```{r}
+nepal_rivers_all <- asia_rivers %>%
+  st_filter(y = nepal_basin, .predicate = st_intersects)
+```
+
+Filter for different river orders 
+```{r}
+# Filter rivers to order 1 
+nepal_rivers1 <- nepal_rivers_all %>% 
+  filter(ord_stra == 1)
+
+nepal_rivers2 <- nepal_rivers_all %>% 
+  filter(ord_stra == 2)
+
+nepal_rivers3 <- nepal_rivers_all %>% 
+  filter(ord_stra == 3)
+
+nepal_rivers4 <- nepal_rivers_all %>% 
+  filter(ord_stra == 4)
+
+nepal_rivers5 <- nepal_rivers_all %>% 
+  filter(ord_stra == 5)
+
+nepal_rivers6 <- nepal_rivers_all %>% 
+  filter(ord_stra == 6)
+
+nepal_rivers7 <- nepal_rivers_all %>% 
+  filter(ord_stra == 7)
+
+nepal_rivers8 <- nepal_rivers_all %>% 
+  filter(ord_stra == 8)
+
+nepal_rivers9 <- nepal_rivers_all %>% 
+  filter(ord_stra == 9)
+```
+
+Map River orders 
+```{r}
+#tmap_mode("view")
+
+tm_shape(nepal_basin) + 
+  tm_polygons(fill_alpha = 0.4, lwd = 2.5) + 
+  tm_basemap('Esri.WorldTopoMap') + 
+  tm_shape(nepal_rivers1) +
+  tm_lines(col = "red") + 
+  tm_shape(nepal_rivers2) + 
+  tm_lines(col = "orange") +
+  tm_shape(nepal_rivers3) + 
+  tm_lines(col = "yellow")+  
+  tm_shape(nepal_rivers4) + 
+  tm_lines(col = "olivedrab") +
+  tm_shape(nepal_rivers5) + 
+  tm_lines(col = "darkgreen") +
+  tm_shape(nepal_rivers6) + 
+  tm_lines(col = "lightblue") +
+  tm_shape(nepal_rivers7) + 
+  tm_lines(col = "blue") +
+  tm_shape(nepal_rivers8) + 
+  tm_lines(col = "darkblue") + 
+  tm_shape(nepal_rivers9) + 
+  tm_lines(col = "purple") + 
+  tm_shape(nepal_current_dams) + 
+  tm_dots(fill = "black") + 
+  tm_shape(nepal_future_dams) + 
+  tm_dots(fill = "black") 
+
+
+```
+
