@@ -37,12 +37,14 @@ nepal_rivers <- st_cast(nepal_rivers , "LINESTRING")
 
 ```{r}
 net <- as_sfnetwork(nepal_rivers, direction = TRUE) %>% # convert river geom into spatial network
-  activate("edges") %>%  # "Next operation applied to edges table (not node table)"
+  tidygraph::activate("edges") %>%  # "Next operation applied to edges table (not node table)"
   mutate(weight = edge_length()) # calculate spatial length of each edge (river segment)
          
 
 net_df <- as_tibble(net) # makes sfnetwork a df 
 
+# Look at net  
+plot(net, col = "blue", main = "Base R Plot of net from nepal_rivers")
 ```
 
 Checking direction
@@ -95,27 +97,46 @@ net_with_dams <- net %>%
 
 net_with_dams_df <- as_tibble(net_with_dams) # makes sfnetwork a df 
 
+
+
+# Plotting every line edge and juntion from net_with_dams
+ggplot() +
+  geom_sf(data = st_as_sf(net_with_dams, "nodes"), color = "red", size = 0.3) +
+  geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.3) +
+  theme_minimal() +
+  labs(title = "net_with_dams with ggplot2")
+
+
 ```
 
 ### Look at snapped dams that are now nodes
 
 ```{r}
 
-# See which nodes are dams 
-net_with_dams %>% 
-  activate("nodes") %>% 
+# Which nodes are dams and making them a df 
+dam_nodes_sf <- net_with_dams %>% 
+  tidygraph::activate("nodes") %>% 
   as_tibble() %>% 
-  filter(is_dam == TRUE)
+  filter(is_dam == TRUE) %>% 
+  st_as_sf()
 
 # Snapped 74 dam nodes (of the 80 `nepal_current_dams` obs) - thats good! 
 
 
 # Pulling `hybas_id` dams that snapped to the river network 
-hybas_id_snapped_dams <- net_with_dams %>% 
-  activate("nodes") %>% 
+grand_id_snapped_dams <- net_with_dams %>% 
+  tidygraph::activate("nodes") %>% 
   as_tibble() %>% 
   filter(is_dam == TRUE) %>% 
-  pull(hybas_id)
+  pull(grand_id)
+
+
+# Plotting every line edge and juntion from net_with_dams
+ggplot() +
+  geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.2) +
+  geom_sf(data = st_as_sf(dam_nodes_sf, "nodes"), color = "red", size = 0.5) +
+  theme_minimal() +
+  labs(title = "current dams that became nodes with ggplot2")
 
 ```
 
@@ -123,10 +144,10 @@ hybas_id_snapped_dams <- net_with_dams %>%
 
 ```{r}
 # all dams 
-length(nepal_current_dams$hybas_id)
+length(nepal_current_dams$grand_id)
 
 # Dams that were snapped 
-length(hybas_id_snapped_dams)
+length(grand_id_snapped_dams)
 
 ```
 
@@ -136,7 +157,7 @@ length(hybas_id_snapped_dams)
 
 # Getting the dam node ID 
 dam_nodes <- net_with_dams %>% 
-  activate("nodes") %>% 
+  tidygraph::activate("nodes") %>% 
   mutate(node_id = row_number()) %>% # create new column with node ID
   as_tibble() %>% 
   filter(is_dam == TRUE) %>% 
@@ -147,9 +168,9 @@ connectivity_matrix  <- distances(  # library(igraph) - calculates shortest path
   net_with_dams, 
   v = dam_nodes, # starting nodes 
   to = dam_nodes, # ending nodes - creats all pairwise combinations 
-  weights = activate(net_with_dams, "edges") %>% # use river segment lengths to calculate shortest path 
+  weights = tidygraph::activate(net_with_dams, "edges") %>% # use river segment lengths to calculate shortest path 
   pull(weight), # extract the `weight` column
-  #mode = "out"
+  mode = "out" # DIRECTIONAL CONNECTIVITY 
   )
 
 connectivity_matrix
@@ -159,14 +180,14 @@ connectivity_matrix
 ```{r}
 
 # Get hybas_id for each dam node directly from network
-dam_hybas_ids <- net_with_dams %>%
-  activate("nodes") %>%
+dam_grand_ids <- net_with_dams %>%
+  tidygraph::activate("nodes") %>%
   as_tibble() %>%
   slice(dam_nodes) %>%
-  pull(hybas_id)
+  pull(grand_id)
 
 # Create dam labels using full hybas_id
-dam_labels <- paste0("Dam_", dam_hybas_ids)
+dam_labels <- paste0("Dam_", dam_grand_ids)
 
 # Get number of dams (rows/columns in symmetric matrix)
 n_dams <- nrow(connectivity_matrix)
@@ -218,4 +239,5 @@ ggplot(reach_df, aes(x = distance_m / 1000)) +
 
 
 ```
+
 
