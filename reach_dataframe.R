@@ -3,6 +3,17 @@
 # NOTE: Not yet directional
 # Requires running connectivity_matrix.qmd --- Environemnt should have: connectivity_matrix, dam_nodes, net_with_dams 
 
+# Load libraries 
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(renv)
+library(sfnetworks)
+
+# snapping and creating nodes of dams 
+net_with_dams <- net %>% 
+  st_network_blend(nepal_current_dams, tolerance = 1000)
+
 # Get hybas_id for each dam node directly from network
 dam_hybas_ids <- net_with_dams %>%
   activate("nodes") %>%
@@ -45,8 +56,8 @@ reach_df <- reach_df[reach_df$distance_m > 0 & !is.na(reach_df$distance_m) & is.
 # Sort dataframe by distance column (ascending order)
 reach_df <- reach_df[order(reach_df$distance_m), ]
 
-# Load ggplot2 library for plotting
-library(ggplot2)
+# Look at dataframe 
+head(reach_df)
 
 # Create histogram plot: x-axis is distance in km
 ggplot(reach_df, aes(x = distance_m / 1000)) +
