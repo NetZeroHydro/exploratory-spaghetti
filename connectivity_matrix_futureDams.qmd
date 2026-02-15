@@ -75,7 +75,7 @@ nepal_current_dams <- nepal_current_dams %>%
   mutate(is_current_dam = TRUE)
 
 nepal_future_dams <- nepal_future_dams %>% 
-  mutate(is_future_dam = TRUE)
+  mutate(is_current_dam = FALSE)
 
 
 ```
@@ -89,22 +89,27 @@ nepal_future_dams <- nepal_future_dams %>%
 -   If location of snapped point is already a node, the attributes of point will be joined to the pre-existing node
 
 ```{r}
+# (1) combine future and current dam dfs
+nepal_current_dams <- nepal_current_dams %>% 
+  select(hybas_id, next_down, next_sink, main_bas, dist_sink, dist_main, sub_area, up_area, pfaf_id, endo, coast, order, sort, dam_id, geometry, is_current_dam) 
+
+nepal_future_dams <- nepal_future_dams %>% 
+  select(hybas_id, next_down, next_sink, main_bas, dist_sink, dist_main, sub_area, up_area, pfaf_id, endo, coast, order, sort, dam_id, geometry, is_current_dam)
+
+all_dams <- rbind(nepal_current_dams, nepal_future_dams)
+
+
 # snapping and creating nodes of dams 
 net_with_dams <- net %>% 
-  st_network_blend(nepal_current_dams, tolerance = 1000)
+  st_network_blend(all_dams, tolerance = 1000)
 
-net_with_all_dams <- net_with_dams %>% 
-  st_network_blend(nepal_future_dams, tolerance = 1000)
-
-
-net_with_all_dams_df <- as_tibble(net_with_all_dams) # makes sfnetwork a df 
-
+net_with_dams_df <- as_tibble(net_with_dams) # makes sfnetwork a df 
 
 
 # Plotting every line edge and juntion from net_with_dams
 ggplot() +
-  geom_sf(data = st_as_sf(net_with_all_dams, "nodes"), color = "red", size = 0.3) +
-  geom_sf(data = st_as_sf(net_with_all_dams, "edges"), color = "gray40", size = 0.3) +
+  geom_sf(data = st_as_sf(net_with_dams, "nodes"), color = "red", size = 0.3) +
+  geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.3) +
   theme_minimal() +
   labs(title = "net_with_dams with ggplot2")
 
@@ -116,33 +121,33 @@ ggplot() +
 ```{r}
 
 # Which nodes are dams and making them a df 
-current_dam_nodes_sf <- net_with_all_dams %>% 
+current_dam_nodes_sf <- net_with_dams %>% 
   tidygraph::activate("nodes") %>% 
   as_tibble() %>% 
   filter(is_current_dam == TRUE) %>% 
   st_as_sf()
 
 
-future_dam_nodes_sf <- net_with_all_dams %>% 
+future_dam_nodes_sf <- net_with_dams %>% 
   tidygraph::activate("nodes") %>% 
   as_tibble() %>% 
-  filter(is_future_dam == TRUE) %>% 
+  filter(is_current_dam == FALSE) %>% 
   st_as_sf()
 
 # Snapped 74 dam nodes (of the 80 `nepal_current_dams` obs) - thats good! 
 
 
-# Pulling `hybas_id` dams that snapped to the river network 
-dam_id_snapped_dams <- net_with_all_dams %>%
+# Pulling `dam_id` dams that snapped to the river network 
+dam_id_snapped_dams <- net_with_dams %>%
    tidygraph::activate("nodes") %>%
    as_tibble() %>%
-   filter(is_current_dam == TRUE | is_future_dam == TRUE) %>%
+   filter(is_current_dam == TRUE | is_current_dam == FALSE) %>%
    pull(dam_id)
 
 
 # Plotting every line edge and juntion from net_with_dams
 ggplot() +
-  geom_sf(data = st_as_sf(net_with_all_dams, "edges"), color = "gray40", size = 0.2) +
+  geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.2) +
   geom_sf(data = st_as_sf(current_dam_nodes_sf, "nodes"), color = "red", size = 0.5) +
   geom_sf(data = st_as_sf(future_dam_nodes_sf, "nodes"), color = "blue", size = 0.5) +
   theme_minimal() +
@@ -163,12 +168,12 @@ length(dam_id_snapped_dams)
 
 ```
 
-## Creating a **directional** connectivity matrix
+## Creating a **directional** / **un-directional** connectivity matrix
 
 ```{r}
 
 # Getting the current dam node ID 
-current_dam_nodes <- net_with_all_dams %>% 
+current_dam_nodes <- net_with_dams %>% 
   tidygraph::activate("nodes") %>% 
   mutate(node_id = row_number()) %>% # create new column with node ID
   as_tibble() %>% 
@@ -176,19 +181,19 @@ current_dam_nodes <- net_with_all_dams %>%
   pull(node_id) # list of all dam nodes 
 
 # Getting the future dam node ID 
-future_dam_nodes <- net_with_all_dams %>% 
+future_dam_nodes <- net_with_dams %>% 
   tidygraph::activate("nodes") %>% 
   mutate(node_id = row_number()) %>% # create new column with node ID
   as_tibble() %>% 
-  filter(is_future_dam == TRUE) %>% 
+  filter(is_current_dam == FALSE) %>% 
   pull(node_id) # list of all dam nodes 
 
 # Create connective matrix 
 connectivity_matrix  <- distances(  # library(igraph) - calculates shortest path 
-  net_with_all_dams, 
+  net_with_dams, 
   v = current_dam_nodes, # starting nodes 
-  to = future_dam_nodes, # ending nodes - creats all pairwise combinations 
-  weights = tidygraph::activate(net_with_all_dams, "edges") %>% # use river segment lengths to calculate shortest path 
+  to = future_dam_nodes, # ending nodes - creates all pairwise combinations 
+  weights = tidygraph::activate(net_with_dams, "edges") %>% # use river segment lengths to calculate shortest path 
   pull(weight), # extract the `weight` column
   #mode = "out" # DIRECTIONAL CONNECTIVITY 
   )
@@ -198,9 +203,16 @@ connectivity_matrix
 ```
 
 ```{r}
+# Get dam nodes (current AND future)
+dam_nodes <- net_with_dams %>% 
+  tidygraph::activate("nodes") %>% # activate nodes 
+  mutate(node_id = row_number()) %>% # 
+  as_tibble() %>% 
+  filter(is_current_dam == TRUE | is_current_dam == FALSE) %>% 
+  pull(node_id)
 
 # Get dam_id for each dam node directly from network
-dam_ids <- net_with_all_dams %>%
+dam_ids <- net_with_dams %>%
   tidygraph::activate("nodes") %>%
   as_tibble() %>%
   slice(dam_nodes) %>%
