@@ -9,7 +9,8 @@ current_dams_global <- readRDS("../../../../../capstone/netzerohydro/data/cleane
   janitor::clean_names()
 
 current_dams_global <- read_sf("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
-  janitor::clean_names()
+  janitor::clean_names() 
+  #rename(dam_id = grand_id)
 
 future_dams_global <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
   janitor::clean_names()

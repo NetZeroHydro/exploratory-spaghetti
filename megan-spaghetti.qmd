@@ -416,3 +416,14 @@ river <- river %>%
 
 ```
 
+```{r}
+tm_shape(nepal_current_dams) + 
+  tm_dots(fill = "red") + 
+  tm_shape(nepal_future_dams)+ 
+  tm_dots(fill ="blue") + 
+  tm_shape(nepal_rivers_3up) + 
+  tm_lines()
+
+
+```
+
