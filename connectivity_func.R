@@ -16,6 +16,7 @@
 #' @returns The sum of `x` and `y`.
 #' @export
 
+
 connectivity_func <- function(basin_hybas_id, river_network, current_dam_df, future_dam_df) {
   
   ######### ----------------- SET UP --------------------#########
@@ -92,37 +93,87 @@ connectivity_func <- function(basin_hybas_id, river_network, current_dam_df, fut
   
   net_df <- as_tibble(net) # makes sfnetwork a df 
   
+ 
+  # ------------------- CURRENT + FUTURE DAMS ---------------------------
+  
   # CRS test 
-  if (st_crs(current_dams) == st_crs(future_dams)) {
+  if (st_crs(current_dam_df) == st_crs(future_dam_df)) {
     print("Dam CRS match")
   } else {
-      warning("Dam CRS do not match")
-    }
+    warning("Dam CRS do not match")
+  }
   
   # Mark which nodes are dams (current vs future) before blending & select similar columns
-  current_dams <- current_dams %>% 
-    mutate(is_current_dam = TRUE) %>% 
-    select(hybas_id, next_down, next_sink, main_bas, dist_sink, dist_main, sub_area, up_area, pfaf_id, endo, coast, order, sort, dam_id, geometry, is_current_dam) 
+  current_dams <- current_dam_df %>% 
+    mutate(is_current_dam = TRUE) 
   
-  future_dams <- future_dams %>% 
-    mutate(is_current_dam = FALSE) %>% 
-    select(hybas_id, next_down, next_sink, main_bas, dist_sink, dist_main, sub_area, up_area, pfaf_id, endo, coast, order, sort, dam_id, geometry, is_current_dam)
-  
-  # combine future and current dam dfs
+  future_dams <- future_dam_df %>% 
+    mutate(is_current_dam = FALSE)  
+
+  # Combine future and current dam dfs
   all_dams <- rbind(current_dams, future_dams)
   
   net_with_dams <- net %>% 
     st_network_blend(all_dams, tolerance = 1000)
   
-  net_with_dams_df <- as_tibble(net_with_dams) # makes sfnetwork a df 
   
-  
+  # ------------------- GRAPH ---------------------------
+  # --------- Something wrong here --------------------
+
+  # Which nodes are dams and making them a df
+  current_dam_nodes_sf <- net_with_dams %>%
+    tidygraph::activate("nodes") %>%
+    as_tibble() %>%
+    filter(is_current_dam == TRUE) %>%
+    st_as_sf()
+
+  future_dam_nodes_sf <- net_with_dams %>%
+    tidygraph::activate("nodes") %>%
+    as_tibble() %>%
+    filter(is_current_dam == FALSE) %>%
+    st_as_sf()
+
   # Plotting every line edge and juntion from net_with_dams
   ggplot() +
-    geom_sf(data = st_as_sf(net_with_dams, "nodes"), color = "red", size = 0.3) +
-    geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.3) +
+    geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.2) +
+    geom_sf(data = st_as_sf(current_dam_nodes_sf, "nodes"), color = "red", size = 0.5) +
+    geom_sf(data = st_as_sf(future_dam_nodes_sf, "nodes"), color = "blue", size = 0.5) +
     theme_minimal() +
-    labs(title = "net_with_dams with ggplot2")
+    labs(title = "Current dams that became nodes with ggplot2")
+
+  # ------------------- CONNECTIVITY MATRIX --------------------------
+  
+  # Getting the current dam node ID 
+  current_dam_nodes <- net_with_dams %>% 
+    tidygraph::activate("nodes") %>% 
+    mutate(node_id = row_number()) %>% # create new column with node ID
+    as_tibble() %>% 
+    filter(is_current_dam == TRUE) %>% 
+    pull(node_id) # list of all dam nodes 
+  
+  # Getting the future dam node ID 
+  future_dam_nodes <- net_with_dams %>% 
+    tidygraph::activate("nodes") %>% 
+    mutate(node_id = row_number()) %>% # create new column with node ID
+    as_tibble() %>% 
+    filter(is_current_dam == FALSE) %>% 
+    pull(node_id) # list of all dam nodes 
+  
+  # Create connective matrix 
+  connectivity_matrix  <- distances(  # library(igraph) - calculates shortest path 
+    net_with_dams, 
+    v = current_dam_nodes, # starting nodes 
+    to = future_dam_nodes, # ending nodes - creates all pairwise combinations 
+    weights = tidygraph::activate(net_with_dams, "edges") %>% # use river segment lengths to calculate shortest path 
+      pull(weight), # extract the `weight` column
+    mode = "out" # DIRECTIONAL CONNECTIVITY 
+  )
+  
+  connectivity_matrix
+  
+  # ------------------- Data frame --------------------------
+  
+  
   
   
   

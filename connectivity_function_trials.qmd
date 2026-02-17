@@ -5,10 +5,10 @@ format: html
 
 ```{r}
 
-current_dams_global <- read_sf("../../../../../capstone/netzerohydro/data/raw/current_dams") %>% 
+current_dams_global <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/current_dams.rds") %>% 
   janitor::clean_names()
 
-current_dams_global <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/current_dams.rds") %>% 
+current_dams_global <- read_sf("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
   janitor::clean_names()
 
 future_dams_global <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
@@ -26,7 +26,7 @@ rivers_global <- read_sf("../../../../../capstone/netzerohydro/data/raw/HydroRIV
 
 Making `future_dams` spatial  
 ```{r}
-future_dams <- st_as_sf(current_dams_global,
+future_dams_global <- st_as_sf(current_dams_global,
          coords = c('lon_cleaned', 'lat_cleaned'), 
          crs = st_crs(current_dams))
 ```
@@ -36,6 +36,7 @@ future_dams <- st_as_sf(current_dams_global,
 current_dams_global <- st_point_on_surface(current_dams_global)
 
 ```
+
 
 ```{r}
 connectivity_func(basin_hybas_id = '4030025450', 

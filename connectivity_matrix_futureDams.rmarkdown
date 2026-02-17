@@ -28,14 +28,18 @@ nepal_future_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_
 
 ```
 
+
 Change `nepal_rivers` to 'LINESTRING'
+
 ```{r}
 # Change MULTISTRINGS TO LINESTRING (for sfnetwork)
 nepal_rivers <- st_cast(nepal_rivers , "LINESTRING")
 
 ```
 
+
 ## Convert Nepal River network to sfnetwork
+
 
 ```{r}
 net <- as_sfnetwork(nepal_rivers, direction = TRUE) %>% # convert river geom into spatial network
@@ -50,7 +54,9 @@ plot(net, col = "blue", main = "Base R Plot of net from nepal_rivers")
 ```
 
 
+
 Checking CRS and geometry names
+
 
 ```{r}
 # Check CRS 
@@ -80,6 +86,7 @@ nepal_future_dams <- nepal_future_dams %>%
 
 ```
 
+
 # Snapping dams and creating nodes
 
 `st_network_blend()` does the heavy lifting: it finds the nearest edge for each dam point, snaps the point to it, and splits that edge into two new edges with a new node at the dam location.
@@ -87,6 +94,7 @@ nepal_future_dams <- nepal_future_dams %>%
 -   Blends a point into a network: process of (1) snapping given point in nearest edge in network (2) splitting edge at location (3) adding snapped point as node to network
 
 -   If location of snapped point is already a node, the attributes of point will be joined to the pre-existing node
+
 
 ```{r}
 # (1) combine future and current dam dfs
@@ -116,7 +124,9 @@ ggplot() +
 
 ```
 
+
 ### Look at snapped dams that are now nodes
+
 
 ```{r}
 
@@ -155,7 +165,9 @@ ggplot() +
 
 ```
 
+
 ### Look at total dams numbers vs snapped dams numbers
+
 
 ```{r}
 # all dams 
@@ -168,7 +180,9 @@ length(dam_id_snapped_dams)
 
 ```
 
+
 ## Creating a **directional** / **un-directional** connectivity matrix
+
 
 ```{r}
 
@@ -271,6 +285,4 @@ ggplot(reach_df, aes(x = distance_m / 1000)) +
 
 
 ```
-
-
 
