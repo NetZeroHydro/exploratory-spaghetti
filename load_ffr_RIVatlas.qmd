@@ -1,0 +1,22 @@
+---
+title: "load_ffr_RIVatlas"
+subtitle: "This script loads Free-flowing-river data and merges it with RIVERAtlas"
+format: html
+---
+# Import libraries
+```{r}
+library(janitor)
+library(sf)
+```
+
+
+# Load Data
+```{r}
+ffr <- read_sf("../../../../../capstone/netzerohydro/data/raw/FFR_river_network.gdb") %>%  
+  clean_names()
+
+RiverATLAS <- read_sf("../../../../../capstone/netzerohydro/data/raw/RiverATLAS_Data_v10.gdb") %>% 
+  clean_names()
+
+```
+

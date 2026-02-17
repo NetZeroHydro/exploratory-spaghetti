@@ -21,18 +21,18 @@ library(readxl)
 Download data 
 ```{r}
 # Dams
-current_dams <- read_sf("../../../../../capstone/netzerohydro/data/GRanD_Version_1_3") %>% 
+current_dams <- read_sf("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
   clean_names()
 
-future_dams <- read_csv("../../../../../capstone/netzerohydro/data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
   clean_names()
 
 # Water Basin
-basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
+basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/raw/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
   clean_names()
 
 # Rivers
-asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/HydroRIVERS_v10_as.gdb") %>% 
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/raw/HydroRIVERS_v10_as.gdb") %>% 
   clean_names()
 ```
 
