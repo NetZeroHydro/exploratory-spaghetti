@@ -46,7 +46,7 @@ trial_river <- st_cast(trial_river , "LINESTRING")
 
 ```{r}
 net <- as_sfnetwork(trial_river, direction = TRUE) %>% # convert river geom into spatial network 
-  activate("edges") %>%  # "Next operation applied to edges table (not node table)"
+  tidygraph::activate("edges") %>%  # "Next operation applied to edges table (not node table)"
   mutate(weight = edge_length()) # calculate spatial length of each edge (river segment)
          
 
@@ -130,7 +130,7 @@ plot(net, col = "grey")
 # Plot nodes
 paths_down %>%
   pull(node_paths) %>% # extract Node_path (juctions/points you pass thru) of `paths`
-  walk(plot_path) # applies `plot_path` function for each path 
+  purrr::walk(plot_path) # applies `plot_path` function for each path 
 
 # Plot start and end nodes 
 net %>%
