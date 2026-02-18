@@ -302,3 +302,11 @@ nepal_river_dams <- st_network_join(nepal_rivers_net, currentdams_nodes)
 plot(nepal_river_dams)
 ```
 
+--------------------------
+Read in population data
+```{r}
+pop <- rast('../../../../capstone/netzerohydro/data/raw/global_pop_2020_CN_1km_R2025A_UA_v1.tif')
+
+plot(pop)
+```
+
