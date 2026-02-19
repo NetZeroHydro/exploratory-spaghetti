@@ -1,6 +1,6 @@
 ---
 title: "load_ffr"
-subtitle: "This script loads Free-flowing-river data and merges it with RIVERAtlas"
+subtitle: "This script loads Free-flowing-river data and merges it with HydroRIVERS"
 format: html
 ---
 # Import libraries
