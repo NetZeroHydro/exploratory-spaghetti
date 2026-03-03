@@ -1,0 +1,329 @@
+---
+title: "model_attempt1"
+format: html
+---
+
+# Connectivity Classification & Suitability Model (MCDA:AHP)
+
+```{r}
+#| output: false
+library(tidyverse)
+```
+
+## Create fake data
+
+```{r}
+dam_df <- data.frame(
+  dam_node = c("2001", "2002", "2003", "2004", "2005", "2006", "2007", "2008", "2009", "2010"), 
+  trunk_id = c(1, 1, 1, 2, 2, 2, 3, 3, 4, 4), 
+  upstream_dam_dist = c(NA, 10, 30, NA, 3, NA, 30, 200, NA, 2), 
+  downstream_dam_dist = c(20, 10, NA, NA, 15, 30, 100, 10, NA, 14)
+)
+
+dam_df
+```
+
+## Model 1
+
+### Find connectivity classification from distances
+
+Define:
+
+-   Cascade dam: Downstream & upstream dam within 15
+
+-   FFR dam: No upstream, no downstream dam
+
+-   Upstream dam: There is a downstream dam in 50km
+
+-   Downstream dam: There is an upstream dam in 50km 
+
+```{r}
+# Connectivity classificantion column
+dam_df <- dam_df %>% 
+  mutate(connectivity_category = case_when(
+    upstream_dam_dist <= 15 & downstream_dam_dist <= 15 ~ "cascade", 
+    is.na(upstream_dam_dist) & is.na(downstream_dam_dist) ~ "FFR",
+    is.na(upstream_dam_dist) | downstream_dam_dist <= 50 ~ "upstream", 
+    upstream_dam_dist <= 50 | is.na(downstream_dam_dist) ~ "downstream", 
+    TRUE ~ NA
+  ))
+
+# Column for casade only - not necessary 
+dam_df <- dam_df %>% 
+  mutate(cascade = ifelse(upstream_dam_dist <= 15 & downstream_dam_dist <= 15, 1, 0))
+
+dam_df 
+```
+
+# Model 2
+
+### Calculate Suitability Score from classification + CSI + population + PA
+
+Link: <https://cran.r-project.org/web/packages/RMCDA/vignettes/RMCDA_guidelines.html>
+
+**MCDA: Multi-Criteria Decision Analysis**
+
+-   **Analytic Hierarchy Process (AHP)**: pairwise comparisons
+
+    -   \<10 alternatives, informal weights, and a ranking goal
+
+### Fake data
+
+```{r}
+# Add to the fake dataset 
+dam_df <- dam_df %>% 
+  mutate(CSI = c(0.40, 0.10, 0.22, 0.90, 0.12, 0.25, 0.81, 0.70, 0.95, 0.07), 
+         population = c(0,0,0,0,1,1,0,1,1,1), 
+         pa = c(1,0,0,1,1,0,0,0,1,1)
+         )
+
+dam_df
+```
+
+Connectivity cat –\> Numeric (with cascade weighted more) 
+
+```{r}
+# Need to make connectivity numeric 
+# increase the gap between your connectivity numeric scores
+
+#connectivity_scores <- c("cascade" = 4, "downstream" = 3, "upstream" = 2, "FFR" = 1)
+#connectivity_scores <- c("cascade" = 100, "downstream" = 10, "upstream" = 3, "FFR" = 1) 
+connectivity_scores <- c("cascade" = 10, "downstream" = 5, "upstream" = 2, "FFR" = 1)
+
+dam_df$connectivity <- connectivity_scores[dam_df$connectivity_category]
+```
+
+### **Step 1: Make the df a `decision_matrix` (df –\> matrix)**
+
+```{r}
+library(RMCDA)
+
+# Make df a matrix (RMCDA expects matrix)
+decision_matrix <- as.matrix(dam_df[, c("connectivity", "CSI", "population", "pa")])
+rownames(decision_matrix) <- dam_df$dam_node # Make the rows, the dam ids
+
+```
+
+### **Step 2: Define Criteria Weights via AHP**
+
+What the matrix numbers mean:
+
++---------------+--------------------------------------------+
+| Value         | Meaning                                    |
++===============+============================================+
+| 1             | Equal importance                           |
++---------------+--------------------------------------------+
+| 3             | Moderately more important                  |
++---------------+--------------------------------------------+
+| 5             | Strongly more important                    |
++---------------+--------------------------------------------+
+| 7             | Very strongly more important               |
++---------------+--------------------------------------------+
+| 9             | Extremely more important                   |
++---------------+--------------------------------------------+
+| 1/3, 1/5...   | The inverse — other criterion is preferred |
+|               |                                            |
+|               | The column is preferred over the row       |
++---------------+--------------------------------------------+
+
+My thought:
+
+-   connectivity \>\> CSI \>\> population = pa
+
+(The diagonal is always 1 (criterion vs itself), and the lower triangle is always the reciprocal of the upper triangle).
+
+```{r}
+# Pairwise comparison matrix: comparing criteria on rows and columns
+criteria_pairwise <- matrix(c(
+  1,   3,   5,   5,   # connectivity vs all - connectivity is stronger than all
+  1/3, 1,   3,   3,   # CSI vs all - CSI follows connectivity
+  1/5, 1/3, 1,   1,   # population vs all - pop and pa are the same
+  1/5, 1/3, 1,   1    # PA vs all
+), nrow = 4, byrow = TRUE,
+dimnames = list(
+  c("connectivity", "CSI", "population", "pa"),
+  c("connectivity", "CSI", "population", "pa")
+))
+
+# The numbers I used (3, 5) are reasonable starting points... but we can adjust them to whatever we think.
+
+```
+
+Another Pairwise comparison matrix of 1,5,7 
+```{r}
+# Pairwise comparison matrix: comparing criteria on rows and columns
+
+# criteria_pairwise <- matrix(c(
+#   1,   5,   7,   7,
+#   1/5, 1,   3,   3,
+#   1/7, 1/3, 1,   1,
+#   1/7, 1/3, 1,   1
+# ), nrow = 4, byrow = TRUE,
+# dimnames = list(
+#   c("connectivity", "CSI", "population", "pa"),
+#   c("connectivity", "CSI", "population", "pa")
+# ))
+```
+
+Need to make a pairwise comparisons of alternatives for each criteria for `apply.APA`
+
+APA has 2 levels
+
+-   *Level 1* — Criteria weights (what we already did) "How important is connectivity vs CSI vs population vs PA?" → Produces a weight for each criterion
+
+    -   We have level 1 data because we already have numeric scores for each alternative on each criterion in the dataframe. Thius, we **don't need Level 2 AHP.**
+
+    -   RMCDA's AHP wants alternative comparisons too, but because we will have real scores we don't need that — hence the dummy equal matrices just to extract the weights cleanly.
+
+-   *Level 2* — Alternative comparisons per criterion "For this specific criterion, how does Site A compare to Site B, Site C, etc.?" → Done separately for each criterion → Produces a score for each alternative on each criterion
+
+    -   Repeat this for every criterion — so with 4 criteria and 4 sites, that's **4 separate matrices** (why we make 4 matrices below)
+
+```{r}
+# Create a Dummy matrices (for the apply.APA) that has the same col and row as dam_df
+n_alternatives <- nrow(decision_matrix)
+equal_matrix <- matrix(1, nrow = n_alternatives, 
+                       ncol = n_alternatives,
+                       dimnames = list(rownames(decision_matrix), 
+                                       rownames(decision_matrix)))
+
+comparing.competitors <- list(
+  connectivity = equal_matrix,
+  CSI          = equal_matrix,
+  population   = equal_matrix,
+  PA           = equal_matrix
+)
+```
+
+### **Step 3: Apply AHP –\> Get weights for each criteria!**
+
+```{r}
+# Create weights by applying the criteria_pairwise 
+ahp_result <- apply.AHP(criteria_pairwise, comparing.competitors)
+weights <- ahp_result[[1]]  # extracted criteria weights
+print(weights)
+
+# Extract just the 4 weights
+w <- as.numeric(weights[[2]])
+w
+```
+
+### **Step 4: Apply weights to decision matrix** 
+Use the `topsis` packages to use the weights on the decision matrix
+
+```{r}
+library(topsis)
+
+result <- topsis(decision_matrix, w, impacts = c("+", "-", "-", "-"))
+print(result)
+
+result$score
+```
+
+Add the scores to the dataframe with grades
+
+```{r}
+# Suitability score column
+dam_df <- dam_df %>% 
+  mutate(suitability_score = result$score)
+
+# Give Letters to the scores
+dam_df <- dam_df %>% 
+  mutate(suitability_grade = case_when(
+    suitability_score >= 0.75 ~ "A", 
+    suitability_score >= 0.50 ~ "B",
+    suitability_score >= 0.24 ~ "C",
+    suitability_score >= 0 ~ "D"
+  )
+  )
+
+dam_df
+```
+
+# DONT READ FURTHER 
+
+**Step 3: Use weights in TOPSIS**
+
+`TOPIS` reads the higher number a good
+
+For population and pa, 0 = "good" and 1 = "bad".
+
+For CIS, lower = "good" and higher = "bad".
+
+Therefore, we need to flip those columns
+
+```{r}
+decision_matrix_flipped <- decision_matrix
+
+#Flip cost criteria (CSI, population, PA) so lower = better becomes higher = better
+decision_matrix_flipped[, "CSI"]        <- 1 - decision_matrix[, "CSI"]
+decision_matrix_flipped[, "population"] <- 1 - decision_matrix[, "population"]
+decision_matrix_flipped[, "pa"]         <- 1 - decision_matrix[, "pa"]
+# Giving the binary criteria more leverage in the normalization without changing their relative importance
+#decision_matrix
+decision_matrix_flipped
+```
+
+To give scores to each dam
+
+```{r}
+topsis_result <- apply.TOPSIS(
+  A = decision_matrix_flipped,
+  w = w
+)
+
+print(topsis_result)
+
+```
+
+# Problem
+
+2002 (cascade, low CSI, no pop, no pa) is scoring terribly
+
+```{r}
+# Check normalized matrix
+norm <- apply(decision_matrix_flipped, 2, function(x) x / sqrt(sum(x^2)))
+print(round(norm, 3))
+
+# Check weighted normalized matrix
+weighted_norm <- sweep(norm, 2, w, "*")
+print(round(weighted_norm, 3))
+```
+
+Manually calculating scores
+
+```{r}
+# Step 1: normalized matrix
+norm <- sweep(decision_matrix_flipped, 2, 
+              sqrt(colSums(decision_matrix_flipped^2)), "/")
+
+# Step 2: weighted normalized
+weighted_norm <- sweep(norm, 2, w, "*")
+
+# Step 3: ideal best and worst
+ideal_best  <- apply(weighted_norm, 2, max)
+ideal_worst <- apply(weighted_norm, 2, min)
+
+# Step 4: distances
+d_best  <- sqrt(rowSums((weighted_norm - ideal_best)^2))
+d_worst <- sqrt(rowSums((weighted_norm - ideal_worst)^2))
+
+# Step 5: score
+score <- d_worst / (d_best + d_worst)
+
+print(round(norm["2002",], 3))
+print(round(weighted_norm["2002",], 3))
+print(paste("ideal best:", round(ideal_best, 3)))
+print(paste("2002 d_best:", round(d_best["2002"], 3)))
+print(paste("2002 d_worst:", round(d_worst["2002"], 3)))
+print(paste("2002 score:", round(score["2002"], 3)))
+print(round(score, 3))
+```
+
+```{r}
+print(topsis_result)
+```
+
+The manual TOPSIS gives 2002 a score of 0.572, But apply.TOPSIS gives 2002 = 0.236...
+
+## DITCH TOPSIS
