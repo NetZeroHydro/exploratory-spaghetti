@@ -917,8 +917,4 @@ tm_shape(trial_river) +
                 title = "Dam Connectivity")
 ```
 
-**Summary:** 
-- `connectivity_matrix`: Full distance matrix (data frame format)
-- `distances_df`: All pairwise distances in tidy format
-- `reach_distances`: Distances between consecutive dams along the river
-- All distances are in meters along the river network (hydrological distance, not straight-line)
+

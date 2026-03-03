@@ -1,0 +1,273 @@
+---
+title: "amazonia_crop"
+format: html
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Load and Crop Amazonia Basin Data
+
+This document loads raw dam and river data, crops to the Amazonia basin (South America Level 2), builds a directed river network, snaps dams to the network, and visualizes. Then saves as RDS
+
+**Note:** `dam_id` == `grand_id`
+---
+
+# Load Libraries
+
+```{r}
+#| output: false 
+library(sfnetworks)   
+library(sf)          
+library(tidygraph)
+library(dplyr)       
+library(tidyverse)   
+library(ggplot2)     
+library(janitor)     
+```
+
+---
+
+# Load Raw Data
+
+Load global dam databases and South America hydrography. Paths assume data in `capstone/netzerohydro/data/raw/`.
+
+```{r}
+# Current dams (GRanD)
+current_dams <- read_sf("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
+  janitor::clean_names()
+
+# Future hydropower dams (FHReD)
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+  janitor::clean_names()
+
+# HydroBASINS
+basin_sa <- read_sf("../../../../../capstone/netzerohydro/data/raw/hybas_sa_lev01-12_v1c/hybas_sa_lev02_v1c.shp") %>% 
+  janitor::clean_names()
+
+# World rivers + FFR (combined RDS)
+world_rivers_ffr <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/world_rivers_ffr.rds")
+```
+
+---
+
+# Make Future Dams Spatial and Crop to Amazonia
+
+```{r}
+# Make future dams df spatial 
+future_dams <- st_as_sf(future_dams,
+  coords = c("lon_cleaned", "lat_cleaned"), 
+  crs = st_crs(current_dams))
+
+# Filter water basin to Amazonia (Level 2)
+amazon_basin <- basin_sa %>%
+  filter(hybas_id == 6020006540)
+
+# Filter rivers to order 3 
+sa_rivers_3up <- world_rivers_ffr %>% 
+  filter(ord_stra >= 3,
+         continent == "South America")
+
+sa_rivers_5up <- world_rivers_ffr %>% 
+  filter(ord_stra >= 5,
+         continent == "South America")
+
+# Ensure geometries are valid for spatial operations
+current_dams <- st_make_valid(current_dams)
+future_dams <- st_make_valid(future_dams)
+amazon_basin <- st_make_valid(amazon_basin)
+
+# Crop dams and rivers to Amazonia polygon
+amazon_current_dams <- st_intersection(amazon_basin, current_dams)
+amazon_future_dams <- st_intersection(amazon_basin, future_dams)
+
+amazon_rivers_3up <- sa_rivers_3up %>%
+  st_filter(y = amazon_basin, .predicate = st_intersects)
+
+amazon_rivers_5up <- sa_rivers_5up %>%
+  st_filter(y = amazon_basin, .predicate = st_intersects)
+```
+
+---
+
+# Standardize to dam_id and Check for Duplicates
+
+```{r}
+# Rename grand_id to dam_id (GRanD)
+amazon_current_dams <- amazon_current_dams %>% rename(dam_id = grand_id)
+
+# Convert to character for consistent joins
+amazon_current_dams <- amazon_current_dams %>% mutate(dam_id = as.character(dam_id))
+amazon_future_dams <- amazon_future_dams %>% mutate(dam_id = as.character(dam_id))
+
+# Sanity check: no dam should appear in both current and future
+any(amazon_current_dams$dam_id %in% amazon_future_dams$dam_id)
+```
+
+---
+
+# Convert Rivers to LINESTRING
+
+`sfnetwork` requires LINESTRING geometry. HydroRIVERS may store MULTILINESTRING; we cast to LINESTRING (splits multi-part lines into single segments).
+
+```{r}
+# Testing with order 3+
+amazon_rivers <- st_cast(amazon_rivers_3up, "LINESTRING")
+```
+
+---
+
+# Create River Network
+
+Build a directed spatial network from river edges. Edge direction follows the flow path (first point to last point). `weight` = edge length in meters for distance calculations.
+
+```{r}
+net <- as_sfnetwork(amazon_rivers, directed = TRUE) %>%
+  activate("edges") %>%
+  mutate(weight = edge_length())
+```
+
+---
+
+# Prepare Dams for Snapping
+
+```{r}
+# CRS must match for snapping
+st_crs(amazon_current_dams) == st_crs(amazon_rivers)
+st_crs(amazon_future_dams) == st_crs(amazon_rivers)
+
+# GRanD may store dams as polygons; convert to point for blending
+if (st_geometry_type(amazon_current_dams, by_geometry = FALSE) != "POINT") {
+  amazon_current_dams <- st_point_on_surface(amazon_current_dams)
+}
+
+# Flag dam type for downstream filtering
+amazon_current_dams <- amazon_current_dams %>% mutate(is_current_dam = TRUE)
+amazon_future_dams <- amazon_future_dams %>% mutate(is_current_dam = FALSE)
+
+# Store counts for snapping diagnostics
+n_current_input <- nrow(amazon_current_dams)
+n_future_input <- nrow(amazon_future_dams)
+```
+
+---
+
+# Snap Dams to River Network
+
+`st_network_blend()` snaps each dam point to the nearest edge, splits that edge, and inserts the dam as a node. Dams beyond `tolerance` are not snapped. Amazon scale uses 30 km tolerance (vs 1 km for Nepal).
+
+```{r}
+# Combine dams; only dam_id and is_current_dam needed for blending
+all_dams <- rbind(
+  amazon_current_dams %>% select(dam_id, is_current_dam),
+  amazon_future_dams %>% select(dam_id, is_current_dam)
+)
+
+net_with_dams <- net %>% st_network_blend(all_dams, tolerance = 30000)
+
+# Snapping summary
+dam_nodes_snapped <- net_with_dams %>%
+  activate("nodes") %>%
+  as_tibble() %>%
+  filter(!is.na(is_current_dam)) %>%
+  pull(dam_id)
+
+n_current_snapped <- sum(net_with_dams %>% activate("nodes") %>% as_tibble() %>% pull(is_current_dam) == TRUE, na.rm = TRUE)
+n_future_snapped <- sum(net_with_dams %>% activate("nodes") %>% as_tibble() %>% pull(is_current_dam) == FALSE, na.rm = TRUE)
+
+cat("=== Dam Snapping Summary ===\n")
+cat("Current: Input", n_current_input, "| Snapped", n_current_snapped, "\n")
+cat("Future: Input", n_future_input, "| Snapped", n_future_snapped, "\n")
+
+# List dams that failed to snap (beyond tolerance or off-network)
+current_dams_missing <- setdiff(amazon_current_dams$dam_id, dam_nodes_snapped)
+future_dams_missing <- setdiff(amazon_future_dams$dam_id, dam_nodes_snapped)
+
+if (length(current_dams_missing) > 0) cat("Current dams not snapped:", length(current_dams_missing), "\n")
+if (length(future_dams_missing) > 0) cat("Future dams not snapped:", length(future_dams_missing), "\n")
+```
+
+---
+
+# Extract Dam Nodes and Build Graph
+
+Extract node IDs and sf geometries for current and future dams, then plot the river network with dams overlaid.
+
+```{r}
+# Node indices for connectivity matrices (if extending to connectivity_df workflow)
+current_dam_nodes <- net_with_dams %>%
+  activate("nodes") %>%
+  mutate(node_id = row_number()) %>%
+  as_tibble() %>%
+  filter(is_current_dam == TRUE) %>%
+  pull(node_id)
+
+future_dam_nodes <- net_with_dams %>%
+  activate("nodes") %>%
+  mutate(node_id = row_number()) %>%
+  as_tibble() %>%
+  filter(is_current_dam == FALSE) %>%
+  pull(node_id)
+
+# sf objects for plotting
+current_dam_nodes_sf <- net_with_dams %>%
+  activate("nodes") %>%
+  filter(is_current_dam == TRUE) %>%
+  st_as_sf()
+
+future_dam_nodes_sf <- net_with_dams %>%
+  activate("nodes") %>%
+  filter(is_current_dam == FALSE) %>%
+  st_as_sf()
+
+# Graph: river network (gray) with current dams (red) and future dams (blue)
+ggplot() +
+  geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.2) +
+  geom_sf(data = current_dam_nodes_sf, color = "red", size = 0.5) +
+  geom_sf(data = future_dam_nodes_sf, color = "blue", size = 0.5) +
+  theme_minimal() +
+  labs(
+    title = "Amazonia: Current dams (red) and Future dams (blue) on river network",
+    subtitle = paste0("Current: ", n_current_snapped, " | Future: ", n_future_snapped, " snapped")
+  )
+```
+## Amazonia by Strahler River Order
+
+```{r}
+order_colors <- c(
+  "3" = "yellow",
+  "4" = "olivedrab",
+  "5" = "darkgreen",
+  "6" = "lightblue",
+  "7" = "blue",
+  "8" = "darkblue",
+  "9" = "purple",
+  "10" = "black"
+)
+
+ggplot() +
+  geom_sf(data = amazon_basin, fill = NA, color = "black", linewidth = 0.4) +
+  geom_sf(
+    data = amazon_rivers_3up %>% mutate(ord_stra_chr = as.character(ord_stra)),
+    aes(color = ord_stra_chr),
+    linewidth = 0.25, alpha = 0.9
+  ) +
+  scale_color_manual(values = order_colors, name = "ord_stra") +
+  theme_minimal() +
+  labs(
+    title = "Amazonia rivers colored by Strahler order (ord_stra)"
+  )
+```
+
+---
+
+# Save Cropped Data (Optional)
+
+Save RDS files for use in downstream connectivity analysis (e.g., `connectivity_df`-style reach and cascade workflows).
+
+```{r}
+saveRDS(amazon_basin, "../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_basin.rds")
+saveRDS(amazon_current_dams, "../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_current_dams.rds")
+saveRDS(amazon_future_dams, "../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_future_dams.rds")
+saveRDS(amazon_rivers_3up, "../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_rivers_3up.rds")
+saveRDS(net_with_dams, "../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_net_with_dams.rds")
+```
