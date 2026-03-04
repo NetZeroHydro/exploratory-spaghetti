@@ -167,23 +167,32 @@ ggplot() +
 
 ## Connectivity function example using this basin to see cascades
 ```{r}
-#source(here::here("MEDS", "capstone","connectivity", "connectivity_function.R"))
+# Load the connectivity function
+# source(here::here("MEDS", "capstone", "connectivity", "connectivity_function.R"))
 source(here::here("..", "connectivity", "connectivity_function.R"))
 
-# 1) Build sub-basin network
+# ---- 1) Define the sub-basin and crop rivers ----
+# One Level-4 HydroBASINS polygon; rivers restricted to this area for mapping and network.
 one_subbasin <- amazon_subbasins_lev4 %>%
   filter(hybas_id == 6040345000)
 
+# One amazon basin river network cropped to the selected sub-basin
 rivers_one <- amazon_rivers_3up %>%
-  st_filter(one_subbasin, .predicate = st_intersects) %>% 
-  mutate(bb_id_chr = as.character(bb_id),
-  bb_id_prefix = substr(bb_id_chr, 1, 4))
+  st_filter(one_subbasin, .predicate = st_intersects) %>%
+  mutate(
+    bb_id_chr    = as.character(bb_id),
+    bb_id_prefix = substr(bb_id_chr, 1, 4)   # for plotting trunks by first 4 digits
+  )
 
+# ---- 2) Build the directed river network for this sub-basin ----
+# as_sfnetwork(..., directed = TRUE) gives flow direction; weight = edge length (m) for distances.
+# The directed network is needed for the function
 net_one <- as_sfnetwork(rivers_one, directed = TRUE) %>%
   activate("edges") %>%
   mutate(weight = edge_length())
 
-# 2) Prepare dams for this sub-basin
+# ---- 3) Crop dams to the sub-basin and flag current vs future ----
+# The function expects nodes with dam_id and is_current_dam (TRUE/FALSE). We keep only geometry + those for blending.
 dams_current_one <- dams_current_one %>%
   mutate(is_current_dam = TRUE) %>%
   select(dam_id, is_current_dam, geometry)
@@ -194,14 +203,16 @@ dams_future_one <- dams_future_one %>%
 
 all_dams_one <- rbind(dams_current_one, dams_future_one)
 
-# 3) Blend dams onto the sub-basin network
+# ---- 4) Snap dams onto the network (blend) ----
+# st_network_blend inserts each dam as a node on the nearest edge within tolerance (m). Edges keep bb_id from rivers_one.
 net_with_dams_one <- net_one %>%
-  st_network_blend(all_dams_one, tolerance = 30000)  # adjust if needed
+  st_network_blend(all_dams_one, tolerance = 30000)
 
-# 4) Run connectivity on this small network (no subbasin/hybas_id args)
+# ---- 5) Run connectivity on the sub-basin network ----
+# No subbasin/hybas_id args: the network already only contains this basin. same_trunk_only = TRUE restricts upstream/downstream to current dams on the same bb_id; cascade_threshold_km limits cascade to within that distance (km).
 reach_df_one <- connectivity_from_network(
   net_with_dams_one,
-  cascade_threshold_km = 500,   # or NULL
+  cascade_threshold_km = 500,
   same_trunk_only      = TRUE
 )
 print(reach_df_one)
@@ -248,6 +259,39 @@ ggplot() +
   )
 
 ```
+### Interactive with TMAP
+
+```{r}
+#| message: false
+#| warning: false
+library(tmap)
+tmap_mode("view")   # interactive mode
+
+tm_shape(one_subbasin) +
+  tm_borders(col = "black", lwd = 2) +
+tm_shape(rivers_one) +
+  tm_lines(col = "bb_id_prefix", palette = "Set2", title.col = "bb_id (first 4 digits)") +
+tm_shape(dams_current_one) +
+  tm_symbols(size = 0.3, col = "red", id = "dam_id") +
+tm_shape(dams_future_other) +
+  tm_symbols(size = 0.3, col = "gray60", id = "dam_id") +
+tm_shape(dams_future_cascade) +
+  tm_symbols(size = 0.35, col = "dam_id", id = "dam_id", palette = "Set1")
+```
+
+## Interactive with Leaflet
+
+```{r}
+library(mapview)
+
+# Optional: set colors to match your ggplot (one color per cascade dam, etc.)
+mapview(one_subbasin, color = "black", fill = NA, lwd = 2) +
+  mapview(rivers_one, zcol = "bb_id_prefix", legend = TRUE) +
+  mapview(dams_current_one, color = "red", col.regions = "red", label = dams_current_one$dam_id, cex = 3) +
+  mapview(dams_future_other, color = "gray60", col.regions = "gray60", label = dams_future_other$dam_id, cex = 3) +
+  mapview(dams_future_cascade, zcol = "dam_id", label = dams_future_cascade$dam_id, cex = 3) # Cex is size
+```
+
 
 ## One subbasin with rivers
 ```{r}
