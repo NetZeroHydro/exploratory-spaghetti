@@ -19,15 +19,23 @@ library(sf)
 library(dplyr)     
 library(ggplot2)   
 library(tidyverse) 
+
+# connectivity function libraries
+library(sfnetworks)
+library(igraph)
+# also sf and dplyr
 ```
 
 
 ## Load Amazonia Objects
 
 ```{r}
-# Load Basin and Rivers
+# Load Basin and Rivers and Dams
 amazon_basin <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_basin.rds")
 amazon_rivers_3up <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_rivers_3up.rds")
+amazon_current_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_current_dams.rds")
+amazon_future_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_future_dams.rds")
+amazon_amazon_net_with_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/amazon_amazon_net_with_dams.rds")
 
 # Load South America Level 3 sub-basins
 basin_sa_lev3 <- read_sf(
@@ -156,33 +164,46 @@ ggplot() +
   )
 ```
 ## Map a singular smaller basin to examine backbones
-## Select one subbasin for plotting smaller (with dams )
+
+## Connectivity function example using this basin to see cascades
 ```{r}
+#source(here::here("MEDS", "capstone","connectivity", "connectivity_function.R"))
+source(here::here("..", "connectivity", "connectivity_function.R"))
+
+# 1) Build sub-basin network
 one_subbasin <- amazon_subbasins_lev4 %>%
   filter(hybas_id == 6040345000)
 
 rivers_one <- amazon_rivers_3up %>%
-  st_filter(one_subbasin, .predicate = st_intersects)
+  st_filter(one_subbasin, .predicate = st_intersects) %>% 
+  mutate(bb_id_chr = as.character(bb_id),
+  bb_id_prefix = substr(bb_id_chr, 1, 4))
 
-# Dams inside this sub-basin
-dams_current_one <- amazon_current_dams %>%
-  st_filter(one_subbasin, .predicate = st_intersects)
-dams_future_one <- amazon_future_dams %>%
-  st_filter(one_subbasin, .predicate = st_intersects)
-```
+net_one <- as_sfnetwork(rivers_one, directed = TRUE) %>%
+  activate("edges") %>%
+  mutate(weight = edge_length())
 
-## Connectivity function example using this basin to see cascades
-```{r}
+# 2) Prepare dams for this sub-basin
+dams_current_one <- dams_current_one %>%
+  mutate(is_current_dam = TRUE) %>%
+  select(dam_id, is_current_dam, geometry)
 
-source(here::here("MEDS", "capstone","connectivity", "connectivity_function.R"))
+dams_future_one <- dams_future_one %>%
+  mutate(is_current_dam = FALSE) %>%
+  select(dam_id, is_current_dam, geometry)
 
-# Option 1: pass the polygon
-reach_df_one <- connectivity_from_network(net_with_dams, subbasin = one_subbasin)
+all_dams_one <- rbind(dams_current_one, dams_future_one)
 
-# Option 2 (Takes Longer): pass hybas_id + basins_sf (same result, no one_subbasin needed)
-reach_df_one <- connectivity_from_network(net_with_dams,
-                                          hybas_id = 6040345000,
-                                          basins_sf = amazon_subbasins_lev4)
+# 3) Blend dams onto the sub-basin network
+net_with_dams_one <- net_one %>%
+  st_network_blend(all_dams_one, tolerance = 30000)  # adjust if needed
+
+# 4) Run connectivity on this small network (no subbasin/hybas_id args)
+reach_df_one <- connectivity_from_network(
+  net_with_dams_one,
+  cascade_threshold_km = 500,   # or NULL
+  same_trunk_only      = TRUE
+)
 print(reach_df_one)
 ```
 
