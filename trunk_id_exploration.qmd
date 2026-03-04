@@ -114,46 +114,130 @@ amazon_subbasins_lev4 %>%
   arrange(desc(coalesce(sub_area, up_area))) %>%  # largest first
   head(50)
 ```
+
+## Mapping all subbasins
+```{r}
+# List of sub-basins (or slice to top N to avoid too many panels)
+subbasins_to_plot <- amazon_subbasins_lev4 %>%
+  mutate(hybas_id_chr = as.character(hybas_id))
+
+# For each sub-basin, get intersecting rivers and attach hybas_id
+rivers_facet <- subbasins_to_plot %>%
+  split(.$hybas_id) %>%
+  lapply(function(sb) {
+    rivers_one <- amazon_rivers_3up %>%
+      st_filter(sb, .predicate = st_intersects)
+    if (nrow(rivers_one) == 0) return(NULL)
+    rivers_one$hybas_id_chr <- sb$hybas_id_chr[1]
+    rivers_one
+  }) %>%
+  bind_rows()
+
+# Same for polygon layer (one row per sub-basin for outline)
+subbasins_facet <- subbasins_to_plot %>%
+  filter(hybas_id_chr %in% unique(rivers_facet$hybas_id_chr))
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = subbasins_facet, fill = NA, color = "black", linewidth = 0.4) +
+  geom_sf(
+    data = rivers_facet,
+    aes(color = as.factor(bb_id)),
+    linewidth = 0.35,
+    alpha = 0.9
+  ) +
+  facet_wrap(~ hybas_id_chr) +   # drop scales = "free"
+  guides(color = "none") +
+  theme_minimal() +
+  labs(
+    title = "Amazonia Level-4 sub-basins: backbones (bb_id)",
+    subtitle = "One panel per sub-basin"
+  )
+```
 ## Map a singular smaller basin to examine backbones
+## Select one subbasin for plotting smaller (with dams )
 ```{r}
 one_subbasin <- amazon_subbasins_lev4 %>%
-  filter(hybas_id == 6040007950)
+  filter(hybas_id == 6040345000)
 
 rivers_one <- amazon_rivers_3up %>%
   st_filter(one_subbasin, .predicate = st_intersects)
 
+# Dams inside this sub-basin
+dams_current_one <- amazon_current_dams %>%
+  st_filter(one_subbasin, .predicate = st_intersects)
+dams_future_one <- amazon_future_dams %>%
+  st_filter(one_subbasin, .predicate = st_intersects)
+```
+
+## Connectivity function example using this basin to see cascades
+```{r}
+
+source(here::here("MEDS", "capstone","connectivity", "connectivity_function.R"))
+
+# Option 1: pass the polygon
+reach_df_one <- connectivity_from_network(net_with_dams, subbasin = one_subbasin)
+
+# Option 2 (Takes Longer): pass hybas_id + basins_sf (same result, no one_subbasin needed)
+reach_df_one <- connectivity_from_network(net_with_dams,
+                                          hybas_id = 6040345000,
+                                          basins_sf = amazon_subbasins_lev4)
+print(reach_df_one)
+```
+
+```{r}
+library(ggnewscale)
+
+# Which future dams are in cascade (from sub basin connectivity matrix)
+cascade_ids <- reach_df_one %>%
+  filter(cascade_status == "cascade") %>%
+  pull(dam_id)
+
+dams_future_cascade <- dams_future_one %>% filter(dam_id %in% cascade_ids)
+dams_future_other   <- dams_future_one %>% filter(!dam_id %in% cascade_ids)
+
+# One color per cascade dam (for identification)
+n_cascade <- nrow(dams_future_cascade)
+cascade_pal <- setNames(
+  scales::hue_pal()(max(1, n_cascade)),
+  sort(unique(dams_future_cascade$dam_id))
+)
+
+ggplot() +
+  # Sub-basin outline
+  geom_sf(data = one_subbasin, fill = NA, color = "black", linewidth = 0.4) +
+  # Rivers: trunk colors (first color scale)
+  geom_sf(data = rivers_one, aes(color = as.factor(bb_id_prefix)), linewidth = 0.5) +
+  scale_color_discrete(name = "bb_id (first 4 digits)") +
+  # Second color scale for dams
+  ggnewscale::new_scale_color() +
+  geom_sf(data = dams_current_one, color = "red", size = 2) +
+  geom_sf(data = dams_future_other, color = "gray60", size = 2) +
+  geom_sf(data = dams_future_cascade, aes(color = as.factor(dam_id)), size = 2.5) +
+  scale_color_manual(
+    name = "Future dams (cascade)",
+    values = cascade_pal,
+    guide = guide_legend(override.aes = list(size = 3))
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Sub-basin: trunks by bb_id; future cascade dams by dam_id",
+    subtitle = "Red = current dams; gray = future not in cascade"
+  )
+
+```
+
+## One subbasin with rivers
+```{r}
 ggplot() +
   geom_sf(data = one_subbasin, fill = NA, color = "black", linewidth = 0.4) +
   geom_sf(data = rivers_one, aes(color = as.factor(bb_id)), linewidth = 0.5) +
-  guides(color = "none") +
+  #guides(color = "none") +
   theme_minimal() +
   labs(
     title = "Manually selected Level-4 sub-basin",
     color = "bb_id"
-  )
-```
-```{r}
-one_subbasin <- amazon_subbasins_lev4 %>%
-  filter(hybas_id == 6040007950)
-
-rivers_one <- amazon_rivers_3up %>%
-  st_filter(one_subbasin, .predicate = st_intersects) %>%
-  mutate(
-    bb_id_chr    = as.character(bb_id),
-    bb_id_prefix = substr(bb_id_chr, 1, 4)   # first 4 digits
-  )
-
-ggplot() +
-  geom_sf(data = one_subbasin, fill = NA, color = "black", linewidth = 0.4) +
-  geom_sf(
-    data = rivers_one,
-    aes(color = as.factor(bb_id_prefix)),
-    linewidth = 0.5
-  ) +
-  theme_minimal() +
-  labs(
-    title = "Manually selected Level-4 sub-basin: backbones grouped by first 4 digits of bb_id",
-    color = "bb_id (first 4 digits)"
   )
 ```
 
@@ -198,6 +282,27 @@ ggplot() +
 ```
 
 
+```{r}
+library(patchwork)
+
+p_reach <- ggplot() +
+  geom_sf(data = one_subbasin, fill = NA, color = "black", linewidth = 0.4) +
+  geom_sf(data = rivers_one, aes(color = as.factor(hyriv_id)), linewidth = 0.5) +
+  guides(color = "none") +
+  scale_color_discrete(name = "Reach (HYRIV_ID)") +
+  theme_minimal() +
+  labs(title = "By reach (hyriv_id)")
+
+p_bb <- ggplot() +
+  geom_sf(data = one_subbasin, fill = NA, color = "black", linewidth = 0.4) +
+  geom_sf(data = rivers_one, aes(color = as.factor(bb_id_prefix)), linewidth = 0.5) +
+  guides(color = "none") +
+  scale_color_discrete(name = "bb_id (first 4 digits)") +
+  theme_minimal() +
+  labs(title = "By backbone (bb_id)")
+
+p_reach + p_bb
+```
 
 
 
