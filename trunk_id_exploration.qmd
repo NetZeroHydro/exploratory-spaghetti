@@ -98,7 +98,7 @@ dams_current_one <- amazon_current_dams %>%
 dams_future_one <- amazon_future_dams %>%
   st_filter(one_subbasin, .predicate = st_intersects) %>%
   mutate(is_current_dam = FALSE) %>%
-  dplyr::select(dam_id, is_current_dam, geometry)
+  dplyr::select(dam_id, is_current_dam, geometry, capacity_mw)
 
 all_dams_one <- rbind(dams_current_one, dams_future_one)
 
@@ -165,7 +165,14 @@ reach_df_one <- reach_df_one %>%
     by = "dam_id"
   )
 
-# To add more reach attributes: add the column name in both dplyr::select() calls above
+# Add FhRED Future dam columns back in (wattage (capacity_mw & stage of development)
+reach_df_one <- reach_df_one %>% 
+  left_join(
+    amazon_future_dams %>% dplyr::select(dam_id, capacity_mw, stage),
+    by = "dam_id" 
+  )
+
+# To add more reach attributes from FFR data: add the column name in both dplyr::select() calls above
 # (edge_from, edge_to) and in the dplyr::select() inside left_join here.
 print(reach_df_one)
 
