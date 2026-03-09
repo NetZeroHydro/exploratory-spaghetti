@@ -90,11 +90,13 @@ net_one <- as_sfnetwork(rivers_one, directed = TRUE) %>%
 
 # ---- 3) Crop dams to the sub-basin and flag current vs future ----
 # The function expects nodes with dam_id and is_current_dam (TRUE/FALSE). We keep only geometry + those for blending.
-dams_current_one <- dams_current_one %>%
+dams_current_one <- amazon_current_dams %>%
+  st_filter(one_subbasin, .predicate = st_intersects) %>%
   mutate(is_current_dam = TRUE) %>%
   select(dam_id, is_current_dam, geometry)
 
-dams_future_one <- dams_future_one %>%
+dams_future_one <- amazon_future_dams %>%
+  st_filter(one_subbasin, .predicate = st_intersects) %>%
   mutate(is_current_dam = FALSE) %>%
   select(dam_id, is_current_dam, geometry)
 
