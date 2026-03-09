@@ -93,12 +93,12 @@ net_one <- as_sfnetwork(rivers_one, directed = TRUE) %>%
 dams_current_one <- amazon_current_dams %>%
   st_filter(one_subbasin, .predicate = st_intersects) %>%
   mutate(is_current_dam = TRUE) %>%
-  select(dam_id, is_current_dam, geometry)
+  dplyr::select(dam_id, is_current_dam, geometry)
 
 dams_future_one <- amazon_future_dams %>%
   st_filter(one_subbasin, .predicate = st_intersects) %>%
   mutate(is_current_dam = FALSE) %>%
-  select(dam_id, is_current_dam, geometry)
+  dplyr::select(dam_id, is_current_dam, geometry)
 
 all_dams_one <- rbind(dams_current_one, dams_future_one)
 
@@ -127,7 +127,7 @@ nodes <- net_with_dams_one %>%
 
 future_node_attrs <- nodes %>%
   filter(is_current_dam %in% FALSE) %>%
-  select(node_id, dam_id)
+  dplyr::select(node_id, dam_id)
 
 # --- Edge table: one row per reach; columns are reach attributes from rivers_one ---
 
@@ -142,10 +142,10 @@ edges <- net_with_dams_one %>%
 # "from" and "to" separately, bind rows, then keep one row per node_id so each
 # dam gets one reach’s attributes (both edges have the same reach attributes).
 edge_from <- edges %>%
-  select(node_id = from, csi, ord_stra, bas_name)
+  dplyr::select(node_id = from, csi, ord_stra, bas_name)
 
 edge_to <- edges %>%
-  select(node_id = to, csi, ord_stra, bas_name)
+  dplyr::select(node_id = to, csi, ord_stra, bas_name)
 
 reach_attrs <- bind_rows(edge_from, edge_to) %>%
   group_by(node_id) %>%
@@ -161,12 +161,12 @@ future_node_attrs <- future_node_attrs %>%
 
 reach_df_one <- reach_df_one %>%
   left_join(
-    future_node_attrs %>% select(dam_id, csi, ord_stra, bas_name),
+    future_node_attrs %>% dplyr::select(dam_id, csi, ord_stra, bas_name),
     by = "dam_id"
   )
 
-# To add more reach attributes: add the column name in both select() calls above
-# (edge_from, edge_to) and in the select() inside left_join here.
+# To add more reach attributes: add the column name in both dplyr::select() calls above
+# (edge_from, edge_to) and in the dplyr::select() inside left_join here.
 print(reach_df_one)
 
 ```
@@ -223,7 +223,7 @@ Get list of hybas basins with area we can choose an appropriate sized one.
 ```{r}
 amazon_subbasins_lev4 %>%
   st_drop_geometry() %>% 
-  select(
+  dplyr::select(
     hybas_id,
     sub_area   = any_of("sub_area"),
     up_area    = any_of("up_area"),
@@ -327,6 +327,8 @@ ggplot() +
 library(tmap)
 tmap_mode("view")   # interactive mode
 
+tm_basemap("CartoDB.VoyagerNoLabels") +
+  tm_tiles("CartoDB.PositronOnlyLabels") +
 tm_shape(one_subbasin) +
   tm_borders(col = "black", lwd = 2) +
 tm_shape(rivers_one) +
