@@ -98,7 +98,7 @@ dams_current_one <- amazon_current_dams %>%
 dams_future_one <- amazon_future_dams %>%
   st_filter(one_subbasin, .predicate = st_intersects) %>%
   mutate(is_current_dam = FALSE) %>%
-  dplyr::select(dam_id, is_current_dam, geometry, capacity_mw)
+  dplyr::select(dam_id, is_current_dam, geometry)
 
 all_dams_one <- rbind(dams_current_one, dams_future_one)
 
