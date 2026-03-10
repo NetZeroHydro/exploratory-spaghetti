@@ -1,0 +1,34 @@
+---
+title: "cascade_data_viz"
+format: html
+---
+
+Visualizing how our future dams in a cascade vs not in a cascade fall within CSI values 
+
+1. Boxplot (FFR CSI for cascade vs not cascade dam) 
+```{r}
+reach_df_one %>% 
+  ggplot(aes(x = cascade_status, y = csi)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "CSI by cascade status", 
+       x = "Cascade Status", 
+       y = "CSI")
+```
+
+2. Scatterplot of future dams distance to next dam upstream and downstream vs FFR index
+```{r}
+reach_df_one %>% 
+  dplyr::select(min_distance_upstream_km, min_distance_downstream_km, csi) %>% 
+  pivot_longer(cols = min_distance_upstream_km:min_distance_downstream_km,
+               names_to = "upstream_downstream",
+               values_to = "distance") %>% 
+  ggplot(aes(x = distance, y = csi)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Distance of Future Dam to Current Dam (Upstream or Downstream) by CSI",
+       x = "Distance (km)",
+       y = "CSI")
+```
+
